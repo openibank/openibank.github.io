@@ -1,5 +1,6 @@
-# Forge - CreditChain Smart Contract Studio
+# Forge
 
-Static GitHub Pages deployment for https://forge.creditchain.org.
+Static Forge production build for https://forge.creditchain.org.
 
-Source application: https://github.com/openibank/forge
+Source repository: https://github.com/openibank/forge
+Deployment repository: https://github.com/openibank/openibank.github.io
