@@ -1,0 +1,22 @@
+{
+  "name": "LearnEth",
+  "displayName": "LearnEth",
+  "description": "Learn CreditChain and EVM development with Forge!",
+  "documentation": "https://forge.creditchain.org/docs/learn",
+  "version": "0.1.0",
+  "methods": [
+    "startTutorial",
+    "addRepository",
+    "getCurrentTutorial"
+  ],
+  "kind": "none",
+  "icon": "assets/img/learnEthLogo.webp",
+  "location": "sidePanel",
+  "url": "plugins/learneth/index.html",
+  "repo": "https://github.com/openibank/forge/tree/main/apps/learneth",
+  "maintainedBy": "CreditChain",
+  "authorContact": "",
+  "targets": [
+    "remix"
+  ]
+}
