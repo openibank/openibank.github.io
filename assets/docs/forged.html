@@ -1,0 +1,143 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Forge Daemon | CreditChain Forge</title>
+    <meta
+      name="description"
+      content="Install and use @creditchain/forged to connect a local smart-contract workspace to Forge."
+    />
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg: #101423;
+        --panel: #181d31;
+        --text: #f4f7fb;
+        --muted: #aab4c5;
+        --line: #34405f;
+        --accent: #59c4ff;
+        --gold: #f3c14b;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        background: var(--bg);
+        color: var(--text);
+        line-height: 1.58;
+      }
+
+      main {
+        width: min(900px, calc(100% - 32px));
+        margin: 0 auto;
+        padding: 48px 0 72px;
+      }
+
+      h1,
+      h2 {
+        line-height: 1.15;
+      }
+
+      h1 {
+        margin: 0 0 8px;
+        font-size: clamp(2rem, 7vw, 4rem);
+      }
+
+      h2 {
+        margin-top: 40px;
+        font-size: 1.35rem;
+      }
+
+      p,
+      li {
+        color: var(--muted);
+      }
+
+      a {
+        color: var(--accent);
+      }
+
+      code,
+      pre {
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+      }
+
+      pre {
+        overflow-x: auto;
+        padding: 16px;
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+      }
+
+      code {
+        color: var(--gold);
+      }
+
+      .lede {
+        margin-top: 0;
+        font-size: 1.15rem;
+      }
+
+      .badge {
+        display: inline-flex;
+        align-items: center;
+        margin-bottom: 20px;
+        color: var(--gold);
+        font-weight: 700;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <div class="badge">CreditChain Forge</div>
+      <h1>Forge Daemon</h1>
+      <p class="lede">
+        Use <code>@creditchain/forged</code> to connect a local EVM smart-contract
+        workspace to <a href="https://forge.creditchain.org">forge.creditchain.org</a>.
+      </p>
+
+      <h2>Install</h2>
+      <pre><code>npm install -g @creditchain/forged</code></pre>
+
+      <h2>Connect A Folder</h2>
+      <pre><code>forged -s ./shared_project -u https://forge.creditchain.org</code></pre>
+      <p>
+        Without <code>-s</code>, forged shares the terminal's current directory.
+        For local development, use <code>-u http://127.0.0.1:8080</code>.
+      </p>
+
+      <h2 id="update-to-the-latest-forged">Update</h2>
+      <pre><code>npm install -g @creditchain/forged@latest</code></pre>
+
+      <h2>Options</h2>
+      <pre><code>-v, --version               output the version number
+-u, --forge-ide &lt;url&gt;      URL of the Forge instance allowed to connect
+--remix-ide &lt;url&gt;          legacy alias for --forge-ide
+-s, --shared-folder &lt;path&gt; Folder to share with Forge
+-i, --install &lt;name&gt;       install optional local tooling, such as slither
+-r, --read-only            treat the shared folder as read-only</code></pre>
+
+      <h2 id="ports-usage">Ports Usage</h2>
+      <ul>
+        <li><code>65520</code>: local folder websocket listener.</li>
+        <li><code>65522</code>: Hardhat websocket listener.</li>
+        <li><code>65523</code>: Slither analysis websocket listener.</li>
+        <li><code>65524</code>: Truffle websocket listener.</li>
+        <li><code>65525</code>: Foundry websocket listener.</li>
+      </ul>
+
+      <h2>Safety</h2>
+      <p>
+        Only share project folders you trust, keep a backup of important work,
+        and do not expose the forged ports to the public internet. Use
+        <code>--read-only</code> when Forge should inspect a folder without writing to it.
+      </p>
+    </main>
+  </body>
+</html>
