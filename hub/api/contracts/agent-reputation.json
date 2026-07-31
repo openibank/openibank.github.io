@@ -1,0 +1,255 @@
+{
+  "slug": "agent-reputation",
+  "name": "AgentReputation",
+  "summary": "On-chain reputation for AI agents, accrued only from spending mandates the agent provably served and the real owner attested.",
+  "why_it_exists": "Reputation becomes collateral. An agent's track record is portable and public, so it can earn larger authority over time instead of being trusted blindly.",
+  "standard": "ERC-AGM extension",
+  "tags": [
+    "agent-finance",
+    "reputation",
+    "erc-agm",
+    "registry"
+  ],
+  "provenance": {
+    "verified": true,
+    "verification_method": "deployed bytecode keccak match vs eth_getCode (immutable-aware)",
+    "compiler": "v0.8.24+optimizer(1000000),via_ir=false,evm=cancun",
+    "creator": "0x70997970c51812dc3a010c7d01b50e0d17dc79c8",
+    "creation_tx": "0x3461c0b8b1b866eeb0a47edfaa255ad6edeb0db28adf3661032e87265e10b2d1",
+    "bytecode_size_bytes": 2034,
+    "source_chars": 3999
+  },
+  "deployments": [
+    {
+      "network": "creditchain-testnet",
+      "chain_id": 2026042404,
+      "address": "0x2dE080e97B0caE9825375D31f5D0eD5751fDf16D",
+      "explorer": "https://scan.creditchain.org/address/0x2dE080e97B0caE9825375D31f5D0eD5751fDf16D?net=testnet",
+      "verify_api": "https://api-testnet.creditchain.org/v1/contracts/0x2dE080e97B0caE9825375D31f5D0eD5751fDf16D"
+    }
+  ],
+  "interface": {
+    "functions": [
+      "attestMandate",
+      "attestedMandate",
+      "reputation",
+      "score",
+      "vault"
+    ],
+    "events": [
+      "AgentAttested"
+    ],
+    "errors": [
+      "AlreadyAttested",
+      "NoSettledSpend",
+      "NotMandateOwner",
+      "ZeroVault"
+    ],
+    "abi_entries": 11
+  },
+  "enforced_rails": [
+    "Attester must be the mandate's real owner",
+    "Mandate must have settled spend (spent > 0)",
+    "Each mandate can be attested at most once",
+    "Holds no funds \u2014 pure registry"
+  ],
+  "evidence": {
+    "tests": {
+      "total": 8,
+      "detail": "6 example + 2 invariant properties (~12,800 randomised sequences each)",
+      "invariants": [
+        "Recorded reputation always equals the attested ground truth",
+        "Score is monotonic in verified work"
+      ]
+    },
+    "gas": {},
+    "audit": null,
+    "audit_status": "UNAUDITED \u2014 no external security audit has been performed."
+  },
+  "known_limitations": [
+    "Not audited by an external firm.",
+    "Sybil-resistance of attesters is a consumer concern; consumers may read raw fields and compute their own score rather than trust score()."
+  ],
+  "source_code": "// Copyright (c) CreditChain Research Team. All rights reserved.\n// SPDX-License-Identifier: UNLICENSED\n\npragma solidity ^0.8.24;\n\nimport {IAgentSpendMandate} from \"./IAgentSpendMandate.sol\";\n\n/// @title AgentReputation\n/// @notice On-chain, mandate-backed reputation for AI agents \u2014 the substrate for\n/// \"reputation becomes collateral\" (agents that have provably served real\n/// spending mandates can earn larger ones).\n///\n/// Reputation is built **only** from real `AgentSpendVault` mandates:\n///   - the attester must be the mandate's actual owner,\n///   - the mandate must have settled spend (`spent > 0`),\n///   - each mandate can be attested at most once.\n///\n/// So an agent's record cannot be faked by spamming a counter \u2014 every point is\n/// backed by value the agent actually moved under a human-granted mandate,\n/// verified against the vault at attestation time.\n///\n/// @dev v1 is a pure registry (holds no funds). It is intentionally simple: it\n/// records *what happened* on-chain. Sybil-resistance of the *attesters* (e.g.\n/// weighting by the attester's own stake/reputation) is a consumer concern and\n/// a future extension; consumers may also read the raw fields and compute their\n/// own score rather than trust `score()`.\ncontract AgentReputation {\n    /// The AgentSpendVault (ERC-AGM) this registry draws mandate facts from.\n    IAgentSpendMandate public immutable vault;\n\n    struct Reputation {\n        uint256 mandatesServed; // distinct mandates the agent settled spend under\n        uint256 valueSettled;   // cumulative CCC (wei) settled across those mandates\n        uint64 firstSeen;       // timestamp of first attestation\n        uint64 lastActivity;    // timestamp of latest attestation\n    }\n\n    mapping(address => Reputation) private _rep;\n    /// mandateId => attested, so each mandate contributes at most once.\n    mapping(uint256 => bool) public attestedMandate;\n\n    event AgentAttested(\n        address indexed agent,\n        address indexed owner,\n        uint256 indexed mandateId,\n        uint256 settled,\n        uint256 totalValueSettled,\n        uint256 mandatesServed\n    );\n\n    error NotMandateOwner();\n    error NoSettledSpend();\n    error AlreadyAttested();\n    error ZeroVault();\n\n    constructor(address vault_) {\n        if (vault_ == address(0)) revert ZeroVault();\n        vault = IAgentSpendMandate(vault_);\n    }\n\n    /// @notice The owner of a vault mandate attests its agent's completed work.\n    /// Pulls the mandate from the vault, checks caller is the owner and that the\n    /// agent actually spent, and credits the agent's reputation once per mandate.\n    function attestMandate(uint256 mandateId) external {\n        if (attestedMandate[mandateId]) revert AlreadyAttested();\n\n        IAgentSpendMandate.Mandate memory m = vault.mandate(mandateId);\n        if (msg.sender != m.owner) revert NotMandateOwner();\n        if (m.spent == 0) revert NoSettledSpend();\n\n        attestedMandate[mandateId] = true;\n\n        Reputation storage r = _rep[m.agent];\n        if (r.firstSeen == 0) r.firstSeen = uint64(block.timestamp);\n        r.mandatesServed += 1;\n        r.valueSettled += m.spent;\n        r.lastActivity = uint64(block.timestamp);\n\n        emit AgentAttested(m.agent, m.owner, mandateId, m.spent, r.valueSettled, r.mandatesServed);\n    }\n\n    // \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500 views \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n\n    function reputation(address agent) external view returns (Reputation memory) {\n        return _rep[agent];\n    }\n\n    /// @notice A naive, monotonic reputation score: 100 points per mandate served\n    /// plus one point per whole CCC settled. Provided for convenience; consumers\n    /// that need different weighting should read `reputation()` and compute their\n    /// own. Never decreases as an agent does more verified work.\n    function score(address agent) external view returns (uint256) {\n        Reputation storage r = _rep[agent];\n        return r.mandatesServed * 100 + r.valueSettled / 1e18;\n    }\n}\n",
+  "abi": [
+    {
+      "inputs": [
+        {
+          "internalType": "address",
+          "name": "vault_",
+          "type": "address"
+        }
+      ],
+      "stateMutability": "nonpayable",
+      "type": "constructor"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "uint256",
+          "name": "mandateId",
+          "type": "uint256"
+        }
+      ],
+      "name": "attestMandate",
+      "outputs": [],
+      "stateMutability": "nonpayable",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "uint256",
+          "name": "",
+          "type": "uint256"
+        }
+      ],
+      "name": "attestedMandate",
+      "outputs": [
+        {
+          "internalType": "bool",
+          "name": "",
+          "type": "bool"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "address",
+          "name": "agent",
+          "type": "address"
+        }
+      ],
+      "name": "reputation",
+      "outputs": [
+        {
+          "components": [
+            {
+              "internalType": "uint256",
+              "name": "mandatesServed",
+              "type": "uint256"
+            },
+            {
+              "internalType": "uint256",
+              "name": "valueSettled",
+              "type": "uint256"
+            },
+            {
+              "internalType": "uint64",
+              "name": "firstSeen",
+              "type": "uint64"
+            },
+            {
+              "internalType": "uint64",
+              "name": "lastActivity",
+              "type": "uint64"
+            }
+          ],
+          "internalType": "struct AgentReputation.Reputation",
+          "name": "",
+          "type": "tuple"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "address",
+          "name": "agent",
+          "type": "address"
+        }
+      ],
+      "name": "score",
+      "outputs": [
+        {
+          "internalType": "uint256",
+          "name": "",
+          "type": "uint256"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [],
+      "name": "vault",
+      "outputs": [
+        {
+          "internalType": "contract IAgentSpendMandate",
+          "name": "",
+          "type": "address"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "anonymous": false,
+      "inputs": [
+        {
+          "indexed": true,
+          "internalType": "address",
+          "name": "agent",
+          "type": "address"
+        },
+        {
+          "indexed": true,
+          "internalType": "address",
+          "name": "owner",
+          "type": "address"
+        },
+        {
+          "indexed": true,
+          "internalType": "uint256",
+          "name": "mandateId",
+          "type": "uint256"
+        },
+        {
+          "indexed": false,
+          "internalType": "uint256",
+          "name": "settled",
+          "type": "uint256"
+        },
+        {
+          "indexed": false,
+          "internalType": "uint256",
+          "name": "totalValueSettled",
+          "type": "uint256"
+        },
+        {
+          "indexed": false,
+          "internalType": "uint256",
+          "name": "mandatesServed",
+          "type": "uint256"
+        }
+      ],
+      "name": "AgentAttested",
+      "type": "event"
+    },
+    {
+      "inputs": [],
+      "name": "AlreadyAttested",
+      "type": "error"
+    },
+    {
+      "inputs": [],
+      "name": "NoSettledSpend",
+      "type": "error"
+    },
+    {
+      "inputs": [],
+      "name": "NotMandateOwner",
+      "type": "error"
+    },
+    {
+      "inputs": [],
+      "name": "ZeroVault",
+      "type": "error"
+    }
+  ]
+}

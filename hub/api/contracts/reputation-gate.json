@@ -1,0 +1,380 @@
+{
+  "slug": "reputation-gate",
+  "name": "ReputationGate",
+  "summary": "Makes reputation a precondition for spending. An operator may only spend from a mandate once its on-chain score meets the owner's bar.",
+  "why_it_exists": "Closes the loop between bounded autonomy and earned trust: an agent must earn the right to spend, and keeps it only while its record holds.",
+  "standard": "ERC-AGM optional extension",
+  "tags": [
+    "agent-finance",
+    "reputation",
+    "erc-agm",
+    "authorization",
+    "composition"
+  ],
+  "provenance": {
+    "verified": true,
+    "verification_method": "deployed bytecode keccak match vs eth_getCode (immutable-aware)",
+    "compiler": "v0.8.24+optimizer(1000000),via_ir=false,evm=cancun",
+    "creator": "0x70997970c51812dc3a010c7d01b50e0d17dc79c8",
+    "creation_tx": "0xe2755e74c982ed5c092173e9c2d24e27497e79ac64784010cd45b37e59ea92e8",
+    "bytecode_size_bytes": 3016,
+    "source_chars": 5655
+  },
+  "deployments": [
+    {
+      "network": "creditchain-testnet",
+      "chain_id": 2026042404,
+      "address": "0x5C7c905B505f0Cf40Ab6600d05e677F717916F6B",
+      "explorer": "https://scan.creditchain.org/address/0x5C7c905B505f0Cf40Ab6600d05e677F717916F6B?net=testnet",
+      "verify_api": "https://api-testnet.creditchain.org/v1/contracts/0x5C7c905B505f0Cf40Ab6600d05e677F717916F6B"
+    }
+  ],
+  "interface": {
+    "functions": [
+      "disablePolicy",
+      "isEligible",
+      "policy",
+      "reputation",
+      "setPolicy",
+      "spendVia",
+      "vault"
+    ],
+    "events": [
+      "GatedSpend",
+      "PolicyDisabled",
+      "PolicySet"
+    ],
+    "errors": [
+      "GateNotMandateAgent",
+      "InsufficientReputation",
+      "NotMandateOwner",
+      "NotOperator",
+      "PolicyNotEnabled",
+      "ZeroAddress"
+    ],
+    "abi_entries": 17
+  },
+  "enforced_rails": [
+    "Holds no funds; value stays in the vault until the vault releases it",
+    "Every underlying vault rail still applies \u2014 a gate may only add a precondition, never relax one",
+    "Reputation evaluated at call time, so raising the bar takes effect immediately",
+    "Owner-only policy; rejects mandates the gate is not the agent of",
+    "The vault owner's revoke remains unmediated"
+  ],
+  "evidence": {
+    "tests": {
+      "total": 8,
+      "detail": "unproven agent blocked, proven agent spends, vault rails still bind through the gate, bar-raising cuts off mid-flight, access control, disable + revoke, not-the-agent guard",
+      "invariants": []
+    },
+    "gas": {},
+    "audit": null,
+    "audit_status": "UNAUDITED \u2014 no external security audit has been performed."
+  },
+  "known_limitations": [
+    "Not audited by an external firm.",
+    "Reputation quality is only as good as the attesting owners."
+  ],
+  "source_code": "// Copyright (c) CreditChain Research Team. All rights reserved.\n// SPDX-License-Identifier: UNLICENSED\n\npragma solidity ^0.8.24;\n\nimport {IAgentSpendMandate} from \"./IAgentSpendMandate.sol\";\nimport {AgentReputation} from \"./AgentReputation.sol\";\n\n/// @title ReputationGate\n/// @notice Reputation-gated agent spending \u2014 \"reputation becomes collateral\"\n/// made enforceable. This closes the loop between the two CreditChain\n/// agent-finance primitives: `AgentSpendVault` bounds *how much* an agent may\n/// spend, and `AgentReputation` records *what it has provably done*. This\n/// contract makes the second a precondition of the first.\n///\n/// How it composes without touching either deployed contract: the owner creates\n/// a mandate in the vault whose `agent` is **this gate**, then registers an\n/// operator (the real agent) plus a minimum reputation score. The operator\n/// spends via {spendVia}, which checks reputation and forwards to the vault \u2014\n/// so the vault's own rails (budget, per-tx, window, allowlist, expiry, revoke)\n/// still apply underneath, unchanged and unweakened.\n///\n/// The result: an agent must *earn* the right to spend, and keeps it only while\n/// its on-chain record holds. An owner can raise the bar at any time, and the\n/// vault owner's instant revoke remains the ultimate kill switch.\n///\n/// @dev This gate holds no funds of its own. It is a pure authorisation layer;\n/// all value stays in the vault until the vault itself releases it.\ncontract ReputationGate {\n    IAgentSpendMandate public immutable vault;\n    AgentReputation public immutable reputation;\n\n    struct Policy {\n        address owner;       // who configured this gate entry (the mandate owner)\n        address operator;    // the real agent permitted to spend\n        uint256 minScore;    // required AgentReputation.score(operator)\n        bool enabled;        // owner can disable without touching the vault\n    }\n\n    /// mandateId => policy\n    mapping(uint256 => Policy) private _policies;\n\n    event PolicySet(\n        uint256 indexed mandateId,\n        address indexed owner,\n        address indexed operator,\n        uint256 minScore\n    );\n    event PolicyDisabled(uint256 indexed mandateId, address indexed owner);\n    event GatedSpend(\n        uint256 indexed mandateId,\n        address indexed operator,\n        address indexed recipient,\n        uint256 amount,\n        uint256 operatorScore\n    );\n\n    error NotMandateOwner();\n    error NotOperator();\n    error PolicyNotEnabled();\n    error InsufficientReputation(uint256 score, uint256 required);\n    error ZeroAddress();\n    error GateNotMandateAgent();\n\n    constructor(address vault_, address reputation_) {\n        if (vault_ == address(0) || reputation_ == address(0)) revert ZeroAddress();\n        vault = IAgentSpendMandate(vault_);\n        reputation = AgentReputation(reputation_);\n    }\n\n    /// @notice Mandate owner authorises `operator` to spend from `mandateId`\n    /// once its reputation score reaches `minScore`. Re-callable to raise or\n    /// lower the bar, or to rotate the operator.\n    /// @dev Requires that this gate is actually the mandate's agent, otherwise\n    /// the policy could never be exercised and would be misleading on-chain.\n    function setPolicy(uint256 mandateId, address operator, uint256 minScore) external {\n        if (operator == address(0)) revert ZeroAddress();\n        IAgentSpendMandate.Mandate memory m = vault.mandate(mandateId);\n        if (msg.sender != m.owner) revert NotMandateOwner();\n        if (m.agent != address(this)) revert GateNotMandateAgent();\n\n        _policies[mandateId] = Policy({\n            owner: msg.sender,\n            operator: operator,\n            minScore: minScore,\n            enabled: true\n        });\n        emit PolicySet(mandateId, msg.sender, operator, minScore);\n    }\n\n    /// @notice Owner disables the gate entry. The vault mandate is untouched \u2014\n    /// use the vault's own `revoke` to reclaim funds.\n    function disablePolicy(uint256 mandateId) external {\n        Policy storage p = _policies[mandateId];\n        if (msg.sender != p.owner) revert NotMandateOwner();\n        p.enabled = false;\n        emit PolicyDisabled(mandateId, msg.sender);\n    }\n\n    /// @notice The operator spends through the gate. Reputation is checked at\n    /// call time \u2014 an agent that has not yet earned its score cannot spend, and\n    /// a raised bar takes effect immediately.\n    function spendVia(uint256 mandateId, address recipient, uint256 amount, bytes32 taskRef)\n        external\n    {\n        Policy storage p = _policies[mandateId];\n        if (!p.enabled) revert PolicyNotEnabled();\n        if (msg.sender != p.operator) revert NotOperator();\n\n        uint256 score = reputation.score(msg.sender);\n        if (score < p.minScore) revert InsufficientReputation(score, p.minScore);\n\n        // The vault re-checks every rail; this gate only adds a precondition.\n        vault.spend(mandateId, recipient, amount, taskRef);\n        emit GatedSpend(mandateId, msg.sender, recipient, amount, score);\n    }\n\n    // \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500 views \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n\n    function policy(uint256 mandateId) external view returns (Policy memory) {\n        return _policies[mandateId];\n    }\n\n    /// @notice Whether `operator` currently satisfies the gate for `mandateId`.\n    /// Useful for wallets/UIs to show \"eligible\" before a call is attempted.\n    function isEligible(uint256 mandateId, address operator) external view returns (bool) {\n        Policy storage p = _policies[mandateId];\n        return p.enabled && p.operator == operator && reputation.score(operator) >= p.minScore;\n    }\n}\n",
+  "abi": [
+    {
+      "inputs": [
+        {
+          "internalType": "address",
+          "name": "vault_",
+          "type": "address"
+        },
+        {
+          "internalType": "address",
+          "name": "reputation_",
+          "type": "address"
+        }
+      ],
+      "stateMutability": "nonpayable",
+      "type": "constructor"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "uint256",
+          "name": "mandateId",
+          "type": "uint256"
+        }
+      ],
+      "name": "disablePolicy",
+      "outputs": [],
+      "stateMutability": "nonpayable",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "uint256",
+          "name": "mandateId",
+          "type": "uint256"
+        },
+        {
+          "internalType": "address",
+          "name": "operator",
+          "type": "address"
+        }
+      ],
+      "name": "isEligible",
+      "outputs": [
+        {
+          "internalType": "bool",
+          "name": "",
+          "type": "bool"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "uint256",
+          "name": "mandateId",
+          "type": "uint256"
+        }
+      ],
+      "name": "policy",
+      "outputs": [
+        {
+          "components": [
+            {
+              "internalType": "address",
+              "name": "owner",
+              "type": "address"
+            },
+            {
+              "internalType": "address",
+              "name": "operator",
+              "type": "address"
+            },
+            {
+              "internalType": "uint256",
+              "name": "minScore",
+              "type": "uint256"
+            },
+            {
+              "internalType": "bool",
+              "name": "enabled",
+              "type": "bool"
+            }
+          ],
+          "internalType": "struct ReputationGate.Policy",
+          "name": "",
+          "type": "tuple"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [],
+      "name": "reputation",
+      "outputs": [
+        {
+          "internalType": "contract AgentReputation",
+          "name": "",
+          "type": "address"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "uint256",
+          "name": "mandateId",
+          "type": "uint256"
+        },
+        {
+          "internalType": "address",
+          "name": "operator",
+          "type": "address"
+        },
+        {
+          "internalType": "uint256",
+          "name": "minScore",
+          "type": "uint256"
+        }
+      ],
+      "name": "setPolicy",
+      "outputs": [],
+      "stateMutability": "nonpayable",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "uint256",
+          "name": "mandateId",
+          "type": "uint256"
+        },
+        {
+          "internalType": "address",
+          "name": "recipient",
+          "type": "address"
+        },
+        {
+          "internalType": "uint256",
+          "name": "amount",
+          "type": "uint256"
+        },
+        {
+          "internalType": "bytes32",
+          "name": "taskRef",
+          "type": "bytes32"
+        }
+      ],
+      "name": "spendVia",
+      "outputs": [],
+      "stateMutability": "nonpayable",
+      "type": "function"
+    },
+    {
+      "inputs": [],
+      "name": "vault",
+      "outputs": [
+        {
+          "internalType": "contract IAgentSpendMandate",
+          "name": "",
+          "type": "address"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "anonymous": false,
+      "inputs": [
+        {
+          "indexed": true,
+          "internalType": "uint256",
+          "name": "mandateId",
+          "type": "uint256"
+        },
+        {
+          "indexed": true,
+          "internalType": "address",
+          "name": "operator",
+          "type": "address"
+        },
+        {
+          "indexed": true,
+          "internalType": "address",
+          "name": "recipient",
+          "type": "address"
+        },
+        {
+          "indexed": false,
+          "internalType": "uint256",
+          "name": "amount",
+          "type": "uint256"
+        },
+        {
+          "indexed": false,
+          "internalType": "uint256",
+          "name": "operatorScore",
+          "type": "uint256"
+        }
+      ],
+      "name": "GatedSpend",
+      "type": "event"
+    },
+    {
+      "anonymous": false,
+      "inputs": [
+        {
+          "indexed": true,
+          "internalType": "uint256",
+          "name": "mandateId",
+          "type": "uint256"
+        },
+        {
+          "indexed": true,
+          "internalType": "address",
+          "name": "owner",
+          "type": "address"
+        }
+      ],
+      "name": "PolicyDisabled",
+      "type": "event"
+    },
+    {
+      "anonymous": false,
+      "inputs": [
+        {
+          "indexed": true,
+          "internalType": "uint256",
+          "name": "mandateId",
+          "type": "uint256"
+        },
+        {
+          "indexed": true,
+          "internalType": "address",
+          "name": "owner",
+          "type": "address"
+        },
+        {
+          "indexed": true,
+          "internalType": "address",
+          "name": "operator",
+          "type": "address"
+        },
+        {
+          "indexed": false,
+          "internalType": "uint256",
+          "name": "minScore",
+          "type": "uint256"
+        }
+      ],
+      "name": "PolicySet",
+      "type": "event"
+    },
+    {
+      "inputs": [],
+      "name": "GateNotMandateAgent",
+      "type": "error"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "uint256",
+          "name": "score",
+          "type": "uint256"
+        },
+        {
+          "internalType": "uint256",
+          "name": "required",
+          "type": "uint256"
+        }
+      ],
+      "name": "InsufficientReputation",
+      "type": "error"
+    },
+    {
+      "inputs": [],
+      "name": "NotMandateOwner",
+      "type": "error"
+    },
+    {
+      "inputs": [],
+      "name": "NotOperator",
+      "type": "error"
+    },
+    {
+      "inputs": [],
+      "name": "PolicyNotEnabled",
+      "type": "error"
+    },
+    {
+      "inputs": [],
+      "name": "ZeroAddress",
+      "type": "error"
+    }
+  ]
+}

@@ -1,0 +1,660 @@
+{
+  "slug": "agent-spend-vault",
+  "name": "AgentSpendVault",
+  "summary": "Chain-enforced, bounded, revocable spending mandate for an AI agent. The owner funds a vault and delegates limited authority; the chain enforces every limit.",
+  "why_it_exists": "An AI agent cannot be given a private key safely. This makes bounded spending authority a first-class on-chain object, so an agent can transact autonomously without anyone handing over custody.",
+  "standard": "ERC-AGM",
+  "tags": [
+    "agent-finance",
+    "mandate",
+    "erc-agm",
+    "custody",
+    "reference"
+  ],
+  "provenance": {
+    "verified": true,
+    "verification_method": "deployed bytecode keccak match vs eth_getCode (immutable-aware)",
+    "compiler": "v0.8.24+optimizer(1000000),via_ir=false,evm=cancun",
+    "creator": "0x70997970c51812dc3a010c7d01b50e0d17dc79c8",
+    "creation_tx": "0x9229dcdac71ca29246495bc82781d2e34c7d423c70cd1820f184ec257ff38b1c",
+    "bytecode_size_bytes": 5906,
+    "source_chars": 10702
+  },
+  "deployments": [
+    {
+      "network": "creditchain-testnet",
+      "chain_id": 2026042404,
+      "address": "0xcA03Dc4665A8C3603cb4Fd5Ce71Af9649dC00d44",
+      "explorer": "https://scan.creditchain.org/address/0xcA03Dc4665A8C3603cb4Fd5Ce71Af9649dC00d44?net=testnet",
+      "verify_api": "https://api-testnet.creditchain.org/v1/contracts/0xcA03Dc4665A8C3603cb4Fd5Ce71Af9649dC00d44"
+    }
+  ],
+  "interface": {
+    "functions": [
+      "allowRecipient",
+      "allowlisted",
+      "createMandate",
+      "fundMandate",
+      "mandate",
+      "mandateCount",
+      "revoke",
+      "spend",
+      "spendableNow",
+      "withdraw"
+    ],
+    "events": [
+      "AgentPayment",
+      "MandateCreated",
+      "MandateFunded",
+      "MandateRevoked",
+      "RecipientAllowed",
+      "Withdrawn"
+    ],
+    "errors": [
+      "BudgetExceeded",
+      "InsufficientBalance",
+      "MandateInactive",
+      "NotAgent",
+      "NotOwner",
+      "PerTxExceeded",
+      "RecipientNotAllowed",
+      "Reentrancy",
+      "TransferFailed",
+      "WindowExceeded",
+      "ZeroAddress",
+      "ZeroAmount"
+    ],
+    "abi_entries": 28
+  },
+  "enforced_rails": [
+    "Total budget cap (lifetime ceiling)",
+    "Per-transaction maximum",
+    "Rolling-window rate limit",
+    "Optional recipient allowlist",
+    "Expiry",
+    "Instant owner revoke, refunding the unspent balance",
+    "No global admin escape hatch"
+  ],
+  "evidence": {
+    "tests": {
+      "total": 19,
+      "detail": "13 example + 4 invariant properties (~12,800 randomised sequences each) + conformance",
+      "invariants": [
+        "Solvency: vault balance always equals the sum of mandate balances",
+        "Spent never exceeds budget",
+        "Per-mandate accounting never over-counts",
+        "Global value conservation across any action ordering"
+      ]
+    },
+    "gas": {
+      "spend": "~42k avg (~29k warm)",
+      "createMandate": "~174k"
+    },
+    "audit": null,
+    "audit_status": "UNAUDITED \u2014 no external security audit has been performed."
+  },
+  "known_limitations": [
+    "Not audited by an external firm.",
+    "A compromised agent can still spend up to its rails until revoked \u2014 the design bounds blast radius, it does not eliminate it.",
+    "The rolling window resets lazily; it is a gas-cheap rate limit, not a precise sliding window."
+  ],
+  "source_code": "// Copyright (c) CreditChain Research Team. All rights reserved.\n// SPDX-License-Identifier: UNLICENSED\n\npragma solidity ^0.8.24;\n\n/// @title AgentSpendVault\n/// @notice Programmable, chain-enforced spending authority for AI agents.\n///\n/// This is the primitive that makes an AI agent a *safe* economic actor:\n/// a human (or org) owner funds a vault and delegates a bounded spending\n/// mandate to an agent address. The agent can then pay recipients\n/// autonomously \u2014 no human in the loop per payment \u2014 but every rail is\n/// enforced by the chain, and the owner keeps an instant kill switch.\n///\n/// Enforced rails per mandate:\n///   - total budget cap (lifetime spend ceiling)\n///   - per-transaction maximum (no single payment above the cap)\n///   - rolling time-window limit (rate limit, e.g. \"max X per day\")\n///   - optional recipient allowlist (pay only pre-approved addresses)\n///   - expiry (mandate auto-stops)\n///   - instant owner revocation, which refunds the unspent balance\n///\n/// Value is native CCC held in the vault. Nothing leaves except through\n/// `spend`, gated by the agent's mandate, or `withdraw`/`revoke` by the owner.\n///\n/// @dev Checks-effects-interactions throughout, plus a reentrancy guard on\n/// every value-moving path. No admin can move a mandate's funds except its\n/// own owner \u2014 there is no global escape hatch over user balances.\ncontract AgentSpendVault {\n    struct Mandate {\n        address owner;            // can revoke / withdraw / manage allowlist\n        address agent;            // the only address allowed to spend\n        uint256 budget;          // total lifetime spend ceiling (wei of CCC)\n        uint256 spent;           // cumulative spent\n        uint256 balance;         // CCC currently held for this mandate\n        uint256 perTxMax;        // max value of a single spend (0 = unlimited)\n        uint256 windowLimit;     // max spend within the rolling window (0 = unlimited)\n        uint64 windowSeconds;    // length of the rolling window\n        uint64 windowStart;      // timestamp the current window opened\n        uint256 windowSpent;     // spent within the current window\n        uint64 expiry;           // mandate stops at this timestamp (0 = never)\n        bool allowlistEnabled;   // if true, recipient must be on the allowlist\n        bool revoked;            // owner kill switch\n    }\n\n    /// Reentrancy guard states.\n    uint256 private constant _NOT_ENTERED = 1;\n    uint256 private constant _ENTERED = 2;\n    uint256 private _guard = _NOT_ENTERED;\n\n    uint256 public mandateCount;\n    mapping(uint256 => Mandate) private _mandates;\n    mapping(uint256 => mapping(address => bool)) public allowlisted;\n\n    event MandateCreated(\n        uint256 indexed mandateId,\n        address indexed owner,\n        address indexed agent,\n        uint256 budget,\n        uint256 perTxMax,\n        uint256 windowLimit,\n        uint64 windowSeconds,\n        uint64 expiry,\n        bool allowlistEnabled\n    );\n    event MandateFunded(uint256 indexed mandateId, address indexed from, uint256 amount, uint256 newBalance);\n    event RecipientAllowed(uint256 indexed mandateId, address indexed recipient, bool allowed);\n    event AgentPayment(\n        uint256 indexed mandateId,\n        address indexed agent,\n        address indexed recipient,\n        uint256 amount,\n        bytes32 taskRef,\n        uint256 totalSpent\n    );\n    event MandateRevoked(uint256 indexed mandateId, address indexed owner, uint256 refunded);\n    event Withdrawn(uint256 indexed mandateId, address indexed owner, uint256 amount);\n\n    error NotOwner();\n    error NotAgent();\n    error MandateInactive();\n    error ZeroAddress();\n    error ZeroAmount();\n    error BudgetExceeded();\n    error PerTxExceeded();\n    error WindowExceeded();\n    error RecipientNotAllowed();\n    error InsufficientBalance();\n    error TransferFailed();\n    error Reentrancy();\n\n    modifier nonReentrant() {\n        if (_guard == _ENTERED) revert Reentrancy();\n        _guard = _ENTERED;\n        _;\n        _guard = _NOT_ENTERED;\n    }\n\n    /// @notice Create and fund a spending mandate for an agent. The CCC sent\n    /// with the call becomes the mandate's initial balance.\n    /// @param agent The address allowed to spend under this mandate.\n    /// @param budget Total lifetime spend ceiling.\n    /// @param perTxMax Max value of any single spend (0 = no per-tx cap).\n    /// @param windowLimit Max spend per rolling window (0 = no rate limit).\n    /// @param windowSeconds Rolling-window length in seconds (ignored if windowLimit==0).\n    /// @param expiry Unix time after which the mandate stops (0 = never).\n    /// @param allowlistEnabled If true, recipients must be allowlisted to receive.\n    function createMandate(\n        address agent,\n        uint256 budget,\n        uint256 perTxMax,\n        uint256 windowLimit,\n        uint64 windowSeconds,\n        uint64 expiry,\n        bool allowlistEnabled\n    ) external payable returns (uint256 mandateId) {\n        if (agent == address(0)) revert ZeroAddress();\n        mandateId = ++mandateCount;\n        _mandates[mandateId] = Mandate({\n            owner: msg.sender,\n            agent: agent,\n            budget: budget,\n            spent: 0,\n            balance: msg.value,\n            perTxMax: perTxMax,\n            windowLimit: windowLimit,\n            windowSeconds: windowSeconds,\n            windowStart: uint64(block.timestamp),\n            windowSpent: 0,\n            expiry: expiry,\n            allowlistEnabled: allowlistEnabled,\n            revoked: false\n        });\n        emit MandateCreated(\n            mandateId, msg.sender, agent, budget, perTxMax, windowLimit, windowSeconds, expiry, allowlistEnabled\n        );\n        emit MandateFunded(mandateId, msg.sender, msg.value, msg.value);\n    }\n\n    /// @notice Top up a mandate's balance. Anyone may fund (e.g. a treasury).\n    function fundMandate(uint256 mandateId) external payable {\n        Mandate storage m = _mandates[mandateId];\n        if (m.owner == address(0)) revert MandateInactive();\n        m.balance += msg.value;\n        emit MandateFunded(mandateId, msg.sender, msg.value, m.balance);\n    }\n\n    /// @notice Owner adds/removes a recipient from this mandate's allowlist.\n    function allowRecipient(uint256 mandateId, address recipient, bool allowed) external {\n        Mandate storage m = _mandates[mandateId];\n        if (msg.sender != m.owner) revert NotOwner();\n        if (recipient == address(0)) revert ZeroAddress();\n        allowlisted[mandateId][recipient] = allowed;\n        emit RecipientAllowed(mandateId, recipient, allowed);\n    }\n\n    /// @notice The agent spends from its mandate to a recipient. Every rail is\n    /// enforced here; the call reverts (moving nothing) if any rail is violated.\n    function spend(uint256 mandateId, address recipient, uint256 amount, bytes32 taskRef)\n        external\n        nonReentrant\n    {\n        Mandate storage m = _mandates[mandateId];\n        if (msg.sender != m.agent) revert NotAgent();\n        if (recipient == address(0)) revert ZeroAddress();\n        if (amount == 0) revert ZeroAmount();\n        if (m.revoked) revert MandateInactive();\n        if (m.expiry != 0 && block.timestamp > m.expiry) revert MandateInactive();\n        if (m.allowlistEnabled && !allowlisted[mandateId][recipient]) revert RecipientNotAllowed();\n        if (m.perTxMax != 0 && amount > m.perTxMax) revert PerTxExceeded();\n        if (m.budget != 0 && m.spent + amount > m.budget) revert BudgetExceeded();\n        if (amount > m.balance) revert InsufficientBalance();\n\n        // Rolling-window rate limit: reset the window if it has elapsed.\n        if (m.windowLimit != 0) {\n            if (block.timestamp >= m.windowStart + m.windowSeconds) {\n                m.windowStart = uint64(block.timestamp);\n                m.windowSpent = 0;\n            }\n            if (m.windowSpent + amount > m.windowLimit) revert WindowExceeded();\n            m.windowSpent += amount;\n        }\n\n        // Effects before interaction.\n        m.spent += amount;\n        m.balance -= amount;\n\n        (bool ok,) = recipient.call{value: amount}(\"\");\n        if (!ok) revert TransferFailed();\n\n        emit AgentPayment(mandateId, m.agent, recipient, amount, taskRef, m.spent);\n    }\n\n    /// @notice Owner revokes the mandate (kill switch) and reclaims the unspent\n    /// balance. After this the agent can never spend again.\n    function revoke(uint256 mandateId) external nonReentrant {\n        Mandate storage m = _mandates[mandateId];\n        if (msg.sender != m.owner) revert NotOwner();\n        m.revoked = true;\n        uint256 refund = m.balance;\n        m.balance = 0;\n        if (refund > 0) {\n            (bool ok,) = m.owner.call{value: refund}(\"\");\n            if (!ok) revert TransferFailed();\n        }\n        emit MandateRevoked(mandateId, m.owner, refund);\n    }\n\n    /// @notice Owner pulls back part of the unspent balance without revoking.\n    function withdraw(uint256 mandateId, uint256 amount) external nonReentrant {\n        Mandate storage m = _mandates[mandateId];\n        if (msg.sender != m.owner) revert NotOwner();\n        if (amount == 0) revert ZeroAmount();\n        if (amount > m.balance) revert InsufficientBalance();\n        m.balance -= amount;\n        (bool ok,) = m.owner.call{value: amount}(\"\");\n        if (!ok) revert TransferFailed();\n        emit Withdrawn(mandateId, m.owner, amount);\n    }\n\n    // \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500 views \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n\n    function mandate(uint256 mandateId) external view returns (Mandate memory) {\n        return _mandates[mandateId];\n    }\n\n    /// @notice The most an agent could spend *right now* under all rails,\n    /// given balance, remaining budget, and the live rolling window.\n    function spendableNow(uint256 mandateId) external view returns (uint256) {\n        Mandate storage m = _mandates[mandateId];\n        if (m.revoked) return 0;\n        if (m.expiry != 0 && block.timestamp > m.expiry) return 0;\n        uint256 cap = m.balance;\n        if (m.budget != 0) {\n            uint256 budgetLeft = m.budget > m.spent ? m.budget - m.spent : 0;\n            if (budgetLeft < cap) cap = budgetLeft;\n        }\n        if (m.windowLimit != 0) {\n            uint256 windowLeft;\n            if (block.timestamp >= m.windowStart + m.windowSeconds) {\n                windowLeft = m.windowLimit; // window would reset on next spend\n            } else {\n                windowLeft = m.windowLimit > m.windowSpent ? m.windowLimit - m.windowSpent : 0;\n            }\n            if (windowLeft < cap) cap = windowLeft;\n        }\n        if (m.perTxMax != 0 && m.perTxMax < cap) cap = m.perTxMax;\n        return cap;\n    }\n}\n",
+  "abi": [
+    {
+      "inputs": [
+        {
+          "internalType": "uint256",
+          "name": "mandateId",
+          "type": "uint256"
+        },
+        {
+          "internalType": "address",
+          "name": "recipient",
+          "type": "address"
+        },
+        {
+          "internalType": "bool",
+          "name": "allowed",
+          "type": "bool"
+        }
+      ],
+      "name": "allowRecipient",
+      "outputs": [],
+      "stateMutability": "nonpayable",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "uint256",
+          "name": "",
+          "type": "uint256"
+        },
+        {
+          "internalType": "address",
+          "name": "",
+          "type": "address"
+        }
+      ],
+      "name": "allowlisted",
+      "outputs": [
+        {
+          "internalType": "bool",
+          "name": "",
+          "type": "bool"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "address",
+          "name": "agent",
+          "type": "address"
+        },
+        {
+          "internalType": "uint256",
+          "name": "budget",
+          "type": "uint256"
+        },
+        {
+          "internalType": "uint256",
+          "name": "perTxMax",
+          "type": "uint256"
+        },
+        {
+          "internalType": "uint256",
+          "name": "windowLimit",
+          "type": "uint256"
+        },
+        {
+          "internalType": "uint64",
+          "name": "windowSeconds",
+          "type": "uint64"
+        },
+        {
+          "internalType": "uint64",
+          "name": "expiry",
+          "type": "uint64"
+        },
+        {
+          "internalType": "bool",
+          "name": "allowlistEnabled",
+          "type": "bool"
+        }
+      ],
+      "name": "createMandate",
+      "outputs": [
+        {
+          "internalType": "uint256",
+          "name": "mandateId",
+          "type": "uint256"
+        }
+      ],
+      "stateMutability": "payable",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "uint256",
+          "name": "mandateId",
+          "type": "uint256"
+        }
+      ],
+      "name": "fundMandate",
+      "outputs": [],
+      "stateMutability": "payable",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "uint256",
+          "name": "mandateId",
+          "type": "uint256"
+        }
+      ],
+      "name": "mandate",
+      "outputs": [
+        {
+          "components": [
+            {
+              "internalType": "address",
+              "name": "owner",
+              "type": "address"
+            },
+            {
+              "internalType": "address",
+              "name": "agent",
+              "type": "address"
+            },
+            {
+              "internalType": "uint256",
+              "name": "budget",
+              "type": "uint256"
+            },
+            {
+              "internalType": "uint256",
+              "name": "spent",
+              "type": "uint256"
+            },
+            {
+              "internalType": "uint256",
+              "name": "balance",
+              "type": "uint256"
+            },
+            {
+              "internalType": "uint256",
+              "name": "perTxMax",
+              "type": "uint256"
+            },
+            {
+              "internalType": "uint256",
+              "name": "windowLimit",
+              "type": "uint256"
+            },
+            {
+              "internalType": "uint64",
+              "name": "windowSeconds",
+              "type": "uint64"
+            },
+            {
+              "internalType": "uint64",
+              "name": "windowStart",
+              "type": "uint64"
+            },
+            {
+              "internalType": "uint256",
+              "name": "windowSpent",
+              "type": "uint256"
+            },
+            {
+              "internalType": "uint64",
+              "name": "expiry",
+              "type": "uint64"
+            },
+            {
+              "internalType": "bool",
+              "name": "allowlistEnabled",
+              "type": "bool"
+            },
+            {
+              "internalType": "bool",
+              "name": "revoked",
+              "type": "bool"
+            }
+          ],
+          "internalType": "struct AgentSpendVault.Mandate",
+          "name": "",
+          "type": "tuple"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [],
+      "name": "mandateCount",
+      "outputs": [
+        {
+          "internalType": "uint256",
+          "name": "",
+          "type": "uint256"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "uint256",
+          "name": "mandateId",
+          "type": "uint256"
+        }
+      ],
+      "name": "revoke",
+      "outputs": [],
+      "stateMutability": "nonpayable",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "uint256",
+          "name": "mandateId",
+          "type": "uint256"
+        },
+        {
+          "internalType": "address",
+          "name": "recipient",
+          "type": "address"
+        },
+        {
+          "internalType": "uint256",
+          "name": "amount",
+          "type": "uint256"
+        },
+        {
+          "internalType": "bytes32",
+          "name": "taskRef",
+          "type": "bytes32"
+        }
+      ],
+      "name": "spend",
+      "outputs": [],
+      "stateMutability": "nonpayable",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "uint256",
+          "name": "mandateId",
+          "type": "uint256"
+        }
+      ],
+      "name": "spendableNow",
+      "outputs": [
+        {
+          "internalType": "uint256",
+          "name": "",
+          "type": "uint256"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "uint256",
+          "name": "mandateId",
+          "type": "uint256"
+        },
+        {
+          "internalType": "uint256",
+          "name": "amount",
+          "type": "uint256"
+        }
+      ],
+      "name": "withdraw",
+      "outputs": [],
+      "stateMutability": "nonpayable",
+      "type": "function"
+    },
+    {
+      "anonymous": false,
+      "inputs": [
+        {
+          "indexed": true,
+          "internalType": "uint256",
+          "name": "mandateId",
+          "type": "uint256"
+        },
+        {
+          "indexed": true,
+          "internalType": "address",
+          "name": "agent",
+          "type": "address"
+        },
+        {
+          "indexed": true,
+          "internalType": "address",
+          "name": "recipient",
+          "type": "address"
+        },
+        {
+          "indexed": false,
+          "internalType": "uint256",
+          "name": "amount",
+          "type": "uint256"
+        },
+        {
+          "indexed": false,
+          "internalType": "bytes32",
+          "name": "taskRef",
+          "type": "bytes32"
+        },
+        {
+          "indexed": false,
+          "internalType": "uint256",
+          "name": "totalSpent",
+          "type": "uint256"
+        }
+      ],
+      "name": "AgentPayment",
+      "type": "event"
+    },
+    {
+      "anonymous": false,
+      "inputs": [
+        {
+          "indexed": true,
+          "internalType": "uint256",
+          "name": "mandateId",
+          "type": "uint256"
+        },
+        {
+          "indexed": true,
+          "internalType": "address",
+          "name": "owner",
+          "type": "address"
+        },
+        {
+          "indexed": true,
+          "internalType": "address",
+          "name": "agent",
+          "type": "address"
+        },
+        {
+          "indexed": false,
+          "internalType": "uint256",
+          "name": "budget",
+          "type": "uint256"
+        },
+        {
+          "indexed": false,
+          "internalType": "uint256",
+          "name": "perTxMax",
+          "type": "uint256"
+        },
+        {
+          "indexed": false,
+          "internalType": "uint256",
+          "name": "windowLimit",
+          "type": "uint256"
+        },
+        {
+          "indexed": false,
+          "internalType": "uint64",
+          "name": "windowSeconds",
+          "type": "uint64"
+        },
+        {
+          "indexed": false,
+          "internalType": "uint64",
+          "name": "expiry",
+          "type": "uint64"
+        },
+        {
+          "indexed": false,
+          "internalType": "bool",
+          "name": "allowlistEnabled",
+          "type": "bool"
+        }
+      ],
+      "name": "MandateCreated",
+      "type": "event"
+    },
+    {
+      "anonymous": false,
+      "inputs": [
+        {
+          "indexed": true,
+          "internalType": "uint256",
+          "name": "mandateId",
+          "type": "uint256"
+        },
+        {
+          "indexed": true,
+          "internalType": "address",
+          "name": "from",
+          "type": "address"
+        },
+        {
+          "indexed": false,
+          "internalType": "uint256",
+          "name": "amount",
+          "type": "uint256"
+        },
+        {
+          "indexed": false,
+          "internalType": "uint256",
+          "name": "newBalance",
+          "type": "uint256"
+        }
+      ],
+      "name": "MandateFunded",
+      "type": "event"
+    },
+    {
+      "anonymous": false,
+      "inputs": [
+        {
+          "indexed": true,
+          "internalType": "uint256",
+          "name": "mandateId",
+          "type": "uint256"
+        },
+        {
+          "indexed": true,
+          "internalType": "address",
+          "name": "owner",
+          "type": "address"
+        },
+        {
+          "indexed": false,
+          "internalType": "uint256",
+          "name": "refunded",
+          "type": "uint256"
+        }
+      ],
+      "name": "MandateRevoked",
+      "type": "event"
+    },
+    {
+      "anonymous": false,
+      "inputs": [
+        {
+          "indexed": true,
+          "internalType": "uint256",
+          "name": "mandateId",
+          "type": "uint256"
+        },
+        {
+          "indexed": true,
+          "internalType": "address",
+          "name": "recipient",
+          "type": "address"
+        },
+        {
+          "indexed": false,
+          "internalType": "bool",
+          "name": "allowed",
+          "type": "bool"
+        }
+      ],
+      "name": "RecipientAllowed",
+      "type": "event"
+    },
+    {
+      "anonymous": false,
+      "inputs": [
+        {
+          "indexed": true,
+          "internalType": "uint256",
+          "name": "mandateId",
+          "type": "uint256"
+        },
+        {
+          "indexed": true,
+          "internalType": "address",
+          "name": "owner",
+          "type": "address"
+        },
+        {
+          "indexed": false,
+          "internalType": "uint256",
+          "name": "amount",
+          "type": "uint256"
+        }
+      ],
+      "name": "Withdrawn",
+      "type": "event"
+    },
+    {
+      "inputs": [],
+      "name": "BudgetExceeded",
+      "type": "error"
+    },
+    {
+      "inputs": [],
+      "name": "InsufficientBalance",
+      "type": "error"
+    },
+    {
+      "inputs": [],
+      "name": "MandateInactive",
+      "type": "error"
+    },
+    {
+      "inputs": [],
+      "name": "NotAgent",
+      "type": "error"
+    },
+    {
+      "inputs": [],
+      "name": "NotOwner",
+      "type": "error"
+    },
+    {
+      "inputs": [],
+      "name": "PerTxExceeded",
+      "type": "error"
+    },
+    {
+      "inputs": [],
+      "name": "RecipientNotAllowed",
+      "type": "error"
+    },
+    {
+      "inputs": [],
+      "name": "Reentrancy",
+      "type": "error"
+    },
+    {
+      "inputs": [],
+      "name": "TransferFailed",
+      "type": "error"
+    },
+    {
+      "inputs": [],
+      "name": "WindowExceeded",
+      "type": "error"
+    },
+    {
+      "inputs": [],
+      "name": "ZeroAddress",
+      "type": "error"
+    },
+    {
+      "inputs": [],
+      "name": "ZeroAmount",
+      "type": "error"
+    }
+  ]
+}

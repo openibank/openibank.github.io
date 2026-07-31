@@ -1,0 +1,65 @@
+{
+  "hub": "Forge \u2014 CreditChain AI-era smart contract hub",
+  "generated_from": "live on-chain verification; no hand-entered behaviour claims",
+  "chain": {
+    "name": "CreditChain testnet",
+    "chain_id": 2026042404,
+    "rpc": "https://testnet.creditchain.org"
+  },
+  "count": 3,
+  "contracts": [
+    {
+      "slug": "agent-spend-vault",
+      "name": "AgentSpendVault",
+      "summary": "Chain-enforced, bounded, revocable spending mandate for an AI agent. The owner funds a vault and delegates limited authority; the chain enforces every limit.",
+      "standard": "ERC-AGM",
+      "tags": [
+        "agent-finance",
+        "mandate",
+        "erc-agm",
+        "custody",
+        "reference"
+      ],
+      "address": "0xcA03Dc4665A8C3603cb4Fd5Ce71Af9649dC00d44",
+      "verified": true,
+      "audited": false,
+      "tests": 19,
+      "abi_entries": 28
+    },
+    {
+      "slug": "agent-reputation",
+      "name": "AgentReputation",
+      "summary": "On-chain reputation for AI agents, accrued only from spending mandates the agent provably served and the real owner attested.",
+      "standard": "ERC-AGM extension",
+      "tags": [
+        "agent-finance",
+        "reputation",
+        "erc-agm",
+        "registry"
+      ],
+      "address": "0x2dE080e97B0caE9825375D31f5D0eD5751fDf16D",
+      "verified": true,
+      "audited": false,
+      "tests": 8,
+      "abi_entries": 11
+    },
+    {
+      "slug": "reputation-gate",
+      "name": "ReputationGate",
+      "summary": "Makes reputation a precondition for spending. An operator may only spend from a mandate once its on-chain score meets the owner's bar.",
+      "standard": "ERC-AGM optional extension",
+      "tags": [
+        "agent-finance",
+        "reputation",
+        "erc-agm",
+        "authorization",
+        "composition"
+      ],
+      "address": "0x5C7c905B505f0Cf40Ab6600d05e677F717916F6B",
+      "verified": true,
+      "audited": false,
+      "tests": 8,
+      "abi_entries": 17
+    }
+  ]
+}
