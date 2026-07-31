@@ -55,5 +55,11 @@
   "honesty": {
     "audited": "No contract in this catalog has an external audit. `audited: false` means exactly that.",
     "usage_metrics": "Only real on-chain counts are ever published; no synthetic popularity numbers."
+  },
+  "reference_agent": {
+    "script": "https://forge.creditchain.org/hub/agent-demo.py",
+    "sample_run": "https://forge.creditchain.org/hub/SAMPLE-RUN.txt",
+    "what_it_proves": "An agent reads this manifest, selects a contract by required ABI capability, verifies its bytecode on-chain, receives a bounded mandate, spends autonomously, is refused by the chain when it exceeds a rail, and is disabled instantly on revoke.",
+    "run": "python3 agent-demo.py   # needs foundry `cast` and a funded OWNER_KEY"
   }
 }
