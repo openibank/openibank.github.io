@@ -55,6 +55,9 @@
   code,.mono{font-family:var(--mono);font-size:12px;word-break:break-all}
   .warnbox{border:1px solid #fbbf2455;background:#fbbf2410;color:var(--warn);
     padding:10px 12px;border-radius:8px;font-size:13px}
+  .btn{display:inline-block;border:1px solid var(--line);background:#0e1318;color:var(--acc);
+    border-radius:8px;padding:8px 12px;font-size:13px;text-decoration:none}
+  .btn:hover{border-color:var(--acc);text-decoration:none}
   .close{margin-left:auto;background:none;border:1px solid var(--line);color:var(--dim);
     border-radius:8px;padding:6px 12px;cursor:pointer}
   footer{border-top:1px solid var(--line);padding:26px 0;color:var(--dim);font-size:13px}
@@ -66,7 +69,8 @@
   <div class="logo">Forge<span>.</span></div>
   <span class="pill">CreditChain</span>
   <div class="grow"></div>
-  <a class="mono" href="api/index.json">API</a>
+  <a class="mono" href="api/agent.json">Agent API</a>
+  <a class="mono" href="api/index.json">Catalog JSON</a>
   <a class="mono" href="https://scan.creditchain.org">Explorer</a>
 </div></header>
 
@@ -85,7 +89,7 @@
       <div>chain <b id="s-chain">—</b></div>
     </div>
     <input id="q" class="search" placeholder="Search by intent — e.g. “pay an API per call under a budget”, “revocable”, “reputation”">
-    <div class="hint">Machine-readable first: every card is fetchable as JSON at <code>api/contracts/&lt;slug&gt;.json</code> — agents don't scrape HTML.</div>
+    <div class="hint">Machine-readable first: every card is fetchable as JSON at <code>api/contracts/&lt;slug&gt;.json</code> — agents don't scrape HTML. Start at <a href="api/agent.json">api/agent.json</a>.</div>
   </section>
   <section id="grid" class="grid"></section>
 </div>
@@ -164,6 +168,15 @@ function render(list){
     </article>`).join("");
 }
 
+// Forge IDE (Remix-derived) opens a source file passed as base64 in #code=.
+function ideUrl(c){
+  try{
+    const b64 = btoa(unescape(encodeURIComponent(c.source_code || "")))
+                  .replace(/\+/g,"-").replace(/\//g,"_").replace(/=+$/,"");
+    return "https://forge.creditchain.org/#code=" + b64;
+  }catch(e){ return "https://forge.creditchain.org/"; }
+}
+
 function openCard(slug){
   const c = CARDS.find(x=>x.slug===slug); if(!c) return;
   const d = c.deployments[0];
@@ -207,6 +220,17 @@ function openCard(slug){
 
       <div class="sec"><h3>Interface</h3>
         <div class="mono" style="color:var(--dim)">${c.interface.functions.map(esc).join(" · ")}</div></div>
+
+      <div class="sec"><h3>Use it</h3>
+        <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:10px">
+          <a class="btn" href="${ideUrl(c)}" target="_blank">Open in Forge IDE ↗</a>
+          <a class="btn" href="api/contracts/${c.slug}.json" target="_blank">Card JSON ↗</a>
+          <a class="btn" href="${d.explorer}" target="_blank">On-chain proof ↗</a>
+        </div>
+        <div style="color:var(--dim);font-size:13px">An agent can call this contract under a
+          <strong>chain-enforced spending mandate</strong> — see
+          <a href="api/agent.json">api/agent.json</a> for the machine-readable flow.</div>
+      </div>
     </div>`;
   document.getElementById("dlg").showModal();
 }

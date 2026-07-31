@@ -1,0 +1,59 @@
+{
+  "name": "Forge \u2014 CreditChain contract hub",
+  "description": "Discover source-verified smart contracts and deploy them under a chain-enforced spending mandate.",
+  "spec_version": "0.1",
+  "base_url": "https://forge.creditchain.org/hub",
+  "endpoints": {
+    "list": {
+      "method": "GET",
+      "path": "/api/index.json",
+      "returns": "catalog index with slug, name, summary, tags, verified, audited, tests"
+    },
+    "card": {
+      "method": "GET",
+      "path": "/api/contracts/{slug}.json",
+      "returns": "full contract card: provenance, ABI, source, rails, evidence, limitations"
+    }
+  },
+  "chain": {
+    "name": "CreditChain testnet",
+    "chain_id": 2026042404,
+    "rpc": "https://testnet.creditchain.org",
+    "explorer": "https://scan.creditchain.org",
+    "native_currency": "CCC",
+    "note": "Test network. CCC has no monetary value."
+  },
+  "agent_spending": {
+    "standard": "ERC-AGM",
+    "why": "An agent should never hold a user's private key. Instead the owner funds a vault and grants a bounded, revocable mandate; the chain enforces every limit.",
+    "vault": "0xcA03Dc4665A8C3603cb4Fd5Ce71Af9649dC00d44",
+    "reputation": "0x2dE080e97B0caE9825375D31f5D0eD5751fDf16D",
+    "gate": "0x5C7c905B505f0Cf40Ab6600d05e677F717916F6B",
+    "enforced_rails": [
+      "budget cap",
+      "per-transaction max",
+      "rolling-window rate limit",
+      "recipient allowlist",
+      "expiry",
+      "instant owner revoke"
+    ],
+    "flow": [
+      "Owner calls AgentSpendVault.createMandate(agent, budget, perTxMax, windowLimit, windowSeconds, expiry, allowlistEnabled) and funds it.",
+      "Agent calls spend(mandateId, recipient, amount, taskRef); the chain rejects anything outside the rails.",
+      "Owner may revoke(mandateId) at any time and reclaim the unspent balance."
+    ],
+    "guarantee": "An agent cannot exceed its mandate even if its key is stolen."
+  },
+  "verification": {
+    "meaning": "Every card marked verified had its deployed bytecode keccak-matched against published source via eth_getCode (immutable-aware).",
+    "self_serve": {
+      "method": "POST",
+      "url": "https://api-testnet.creditchain.org/v1/contracts/{address}/verify"
+    },
+    "unverified_policy": "Cards are not published for unverified contracts."
+  },
+  "honesty": {
+    "audited": "No contract in this catalog has an external audit. `audited: false` means exactly that.",
+    "usage_metrics": "Only real on-chain counts are ever published; no synthetic popularity numbers."
+  }
+}
