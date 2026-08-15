@@ -88,8 +88,10 @@
   <a class="nav" href="#catalog">Catalog</a>
   <a class="nav" href="#how">How it works</a>
   <a class="nav" href="#network">Network</a>
+  <a class="nav" href="#auth">Sign-in</a>
   <a class="nav" href="hub/api/agent.json">Agent API</a>
   <a class="cta" href="hub/">Browse catalog</a>
+  <button id="siwe" class="cta" style="border:1px solid var(--line);background:transparent;color:var(--ink);cursor:pointer;margin-left:8px">Connect wallet</button>
 </div></header>
 
 <div class="wrap">
@@ -162,6 +164,24 @@
       faucet <code>https://faucet.creditchain.org/testnet/drip</code> ·
       explorer <a href="https://scan.creditchain.org">scan.creditchain.org</a> ·
       machine-readable <a href="hub/api/agent.json">agent.json</a>
+    </div>
+  </section>
+
+  <section id="auth">
+    <h2>No accounts. Ever.</h2>
+    <p class="sub">Forge has no passwords, no email, and no user database — because it does not need one.</p>
+    <div class="grid3">
+      <div class="card"><div class="num">browse</div><h3>Anonymous by default</h3>
+        <p>Search, read cards, verify provenance and use the agent API with <b>no sign-in at all</b>. A login wall on a contract catalog would destroy the trust it exists to provide.</p></div>
+      <div class="card"><div class="num">publish</div><h3>Your wallet is your identity</h3>
+        <p>Sign a message to prove you control an address. The address that <b>deployed</b> a contract owns its card — permissions are read from the chain, not from us.</p></div>
+      <div class="card"><div class="num">agents</div><h3>A mandate is the account</h3>
+        <p>An agent authenticates with a key scoped to its <b>ERC-AGM mandate</b>. Spend caps, rate limits and revocation already exist on-chain — no separate quota system.</p></div>
+    </div>
+    <div class="disc" style="margin-top:16px">
+      <b>Forge will never ask for a private key or seed phrase.</b> Sign-in requests a
+      <code>personal_sign</code> signature only — it is not a transaction and cannot move funds.
+      Sessions live in <code>sessionStorage</code> and vanish when you close the tab; nothing is stored on a server.
     </div>
   </section>
 
@@ -241,6 +261,27 @@ fetch("hub/api/index.json").then(r=>r.json()).then(d=>{
   document.getElementById("clist").innerHTML =
     '<div class="card">Catalog unavailable right now — try <a href="hub/">the hub</a>.</div>';
 });
+</script>
+<script src="auth.js"></script>
+<script>
+(function(){
+  const btn=document.getElementById('siwe');
+  const paint=()=>{const s=ForgeAuth.session();
+    btn.textContent = s ? ForgeAuth.short(s.address) : 'Connect wallet';
+    btn.title = s ? 'Signed in — click to sign out' : 'Sign in with your wallet (signature only)';};
+  btn.addEventListener('click', async ()=>{
+    const s=ForgeAuth.session();
+    if(s){ ForgeAuth.signOut(); paint(); return; }
+    if(!ForgeAuth.hasWallet()){
+      btn.textContent='No wallet found';
+      setTimeout(paint,2500); return;
+    }
+    btn.textContent='Check wallet…';
+    try{ await ForgeAuth.signIn(); }catch(e){ btn.textContent = /reject|denied/i.test(e.message||'')?'Cancelled':'Failed'; setTimeout(paint,2500); return; }
+    paint();
+  });
+  paint();
+})();
 </script>
 </body>
 </html>
