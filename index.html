@@ -87,6 +87,7 @@
   <div class="grow"></div>
   <a class="nav" href="#catalog">Catalog</a>
   <a class="nav" href="#how">How it works</a>
+  <a class="nav" href="#network">Network</a>
   <a class="nav" href="hub/api/agent.json">Agent API</a>
   <a class="cta" href="hub/">Browse catalog</a>
 </div></header>
@@ -149,6 +150,21 @@
     </div>
   </section>
 
+  <section id="network">
+    <h2>CreditChain, live</h2>
+    <p class="sub">Queried from your browser against the public RPCs — not a cached badge.
+      This is the chain your contracts and agents run on.</p>
+    <div class="grid3" id="netgrid">
+      <div class="card"><div class="num">loading…</div><h3>Testnet</h3><p>querying</p></div>
+    </div>
+    <div style="margin-top:14px;font-size:13px;color:var(--dim)">
+      RPC <code>https://testnet.creditchain.org</code> ·
+      faucet <code>https://faucet.creditchain.org/testnet/drip</code> ·
+      explorer <a href="https://scan.creditchain.org">scan.creditchain.org</a> ·
+      machine-readable <a href="hub/api/agent.json">agent.json</a>
+    </div>
+  </section>
+
   <section id="catalog">
     <h2>Catalog</h2>
     <p class="sub">Seeded with the CreditChain agent-finance primitives. Every claim links to on-chain proof.</p>
@@ -176,6 +192,37 @@
 
 <script>
 const esc = s => String(s??"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+// Live chain status, straight from the public RPCs. If a network is down the
+// card says so — we never render a stale "operational" badge.
+const NETS=[{k:"Testnet",rpc:"https://testnet.creditchain.org",id:2026042404},
+            {k:"Devnet", rpc:"https://devnet.creditchain.org", id:2026042403}];
+const rpc=(u,m,p=[])=>fetch(u,{method:"POST",headers:{"content-type":"application/json"},
+  body:JSON.stringify({jsonrpc:"2.0",id:1,method:m,params:p})}).then(r=>r.json()).then(j=>j.result);
+
+Promise.all(NETS.map(async n=>{
+  try{
+    const [h,c,g]=await Promise.all([rpc(n.rpc,"eth_blockNumber"),rpc(n.rpc,"eth_chainId"),rpc(n.rpc,"eth_gasPrice")]);
+    return {...n, ok:true, height:parseInt(h,16), chainId:parseInt(c,16), gas:parseInt(g,16)};
+  }catch(e){ return {...n, ok:false}; }
+})).then(async rows=>{
+  let idx=null;
+  try{ idx=(await (await fetch("https://api-testnet.creditchain.org/v1/chain/status")).json()).status; }catch(e){}
+  const cards=rows.map(r=>r.ok?`
+    <div class="card"><div class="num">chainId ${r.chainId}</div>
+      <h3>${r.k} <span class="badge b-ok" style="margin-left:6px">● live</span></h3>
+      <p>block <b style="color:var(--ink)">${r.height.toLocaleString()}</b><br>
+         gas ${r.gas} wei · native CCC</p></div>`:`
+    <div class="card"><div class="num">chainId ${r.id}</div>
+      <h3>${r.k} <span class="badge b-warn" style="margin-left:6px">unreachable</span></h3>
+      <p>no response from ${r.rpc}</p></div>`).join("");
+  const idxCard = idx?`
+    <div class="card"><div class="num">explorer index</div>
+      <h3>Indexer <span class="badge b-ok" style="margin-left:6px">● live</span></h3>
+      <p>head ${idx.indexed_head.toLocaleString()} · lag ${idx.indexer_lag_blocks} blocks<br>
+         ${idx.total_indexed_contracts} contracts · ${idx.total_indexed_transactions.toLocaleString()} txs</p></div>`:"";
+  document.getElementById("netgrid").innerHTML = cards + idxCard;
+});
+
 fetch("hub/api/index.json").then(r=>r.json()).then(d=>{
   document.getElementById("s-count").textContent = d.count;
   document.getElementById("s-tests").textContent = d.contracts.reduce((a,c)=>a+c.tests,0);
