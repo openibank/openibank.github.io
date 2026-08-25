@@ -88,6 +88,7 @@
   <a class="nav" href="#proof">Live proof</a>
   <a class="nav" href="#catalog">Catalog</a>
   <a class="nav" href="#how">How it works</a>
+  <a class="nav" href="#quantum">Post-quantum</a>
   <a class="nav" href="#network">Network</a>
   <a class="nav" href="#auth">Sign-in</a>
   <a class="nav" href="/studio.html">Studio</a>
@@ -167,6 +168,61 @@
       <div class="card"><div class="num">03</div><h3>Bounded autonomy</h3>
         <p>An agent acts under an <b>ERC-AGM mandate</b>: budget cap, per-transaction max, rate limit, allowlist, expiry, instant revoke — enforced by the chain, not by trust.</p></div>
     </div>
+  </section>
+
+  <section id="quantum">
+    <h2>Post-quantum, and honest about it</h2>
+    <p class="sub">Shor's algorithm recovers a secp256k1 private key from its public key — and every
+      address that has ever sent a transaction has already published one.</p>
+
+    <div class="disc" style="margin:0 0 26px">
+      <b>Straight answer first:</b> CreditChain's base layer is <b>not</b> quantum resistant — it runs
+      secp256k1 ECDSA, like every other production EVM chain. Anyone claiming otherwise is selling you
+      something. What <i>is</i> live is a post-quantum <b>break-glass authority</b>: the layer where
+      real resistance can ship today, with no hard fork.
+      <a href="https://github.com/finalverse/creditchain/blob/main/docs/quantum/QUANTUM-RESISTANCE.md">Full per-layer status →</a>
+    </div>
+
+    <div class="grid3">
+      <div class="card"><div class="num">01</div><h3>Asymmetry, not decoration</h3>
+        <p>A post-quantum key is worthless if it can only do what the classical key can — the attacker
+          just uses the one they broke. Here the ECDSA controller has <b>no withdraw function at all</b>,
+          cannot redirect recovery, and is capped per window. Only the quantum key sweeps and rotates.</p></div>
+      <div class="card"><div class="num">02</div><h3>Hash-based, so Shor does not apply</h3>
+        <p><b>WOTS+</b> (RFC 8391) over keccak256 — the same one-time signature inside NIST's SLH-DSA.
+          Grover only halves the margin (~128-bit). keccak256 is already an EVM opcode, so verification
+          needs <b>no precompile and no consensus change</b>: 2,144-byte signatures, <b>252,606 gas</b>.</p></div>
+      <div class="card"><div class="num">03</div><h3>Proven against an independent reference</h3>
+        <p>The Solidity verifier accepts a separately written <b>Python</b> implementation's signature
+          bytes cold, and the signer reproduces its output byte-for-byte. Testing a verifier only against
+          its own signer proves agreement, not correctness. <b>32 tests</b>, unaudited.</p></div>
+    </div>
+
+    <div class="terminal" style="margin-top:22px">
+      <div class="tbar">
+        <span class="dot" style="background:#ff5f57"></span>
+        <span class="dot" style="background:#febc2e"></span>
+        <span class="dot" style="background:#28c840"></span>
+        <span class="tt">break-glass &nbsp;·&nbsp; executed on live testnet</span>
+      </div>
+<pre><span class="d">▸ attacker holds a forged ECDSA controller key. what can it do?</span>
+<span class="r">  ✗ withdraw            no such function exists in the ABI</span>
+<span class="r">  ✗ redirect recovery   0x98a838c8  AlreadyArmed()</span>
+<span class="r">  ✗ overspend           0x7afd1a0d  OutflowExceeded(uint256,uint256)</span>
+
+<span class="d">▸ owner signs the break-glass digest OFFLINE with a hash-based key</span>
+<span class="g">  ✓ 2144-byte WOTS+ signature — relayed by a third party, not the owner</span>
+<span class="g">  ✓ every mandate revoked, balances pulled back</span>
+<span class="b">  guard  21 CCC → 0      recovery  0 CCC → 25 CCC</span>
+<span class="g">  ✓ controller rotated · guard frozen · one-time key burned</span>
+<span class="r">  ✗ replay same signature  0x56248192  GuardianConsumed()</span></pre>
+    </div>
+
+    <p class="sub" style="margin-top:20px">
+      Live at <code>0x20Fbd46DeEd5EEDEB6e5c87eeB31924e9CA312ad</code> — source-verified, bytecode hash matched.
+      Manage keys air-gapped with <code>ccq</code>, which writes no secret to disk, opens no socket
+      when signing, and never touches a secp256k1 key.
+    </p>
   </section>
 
   <section id="network">

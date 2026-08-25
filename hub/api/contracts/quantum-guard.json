@@ -1,0 +1,655 @@
+{
+  "slug": "quantum-guard",
+  "name": "QuantumGuard",
+  "summary": "A break-glass authority that survives a broken ECDSA key. Verifies post-quantum WOTS+ signatures on-chain using only keccak256 \u2014 no precompile, no hard fork.",
+  "why_it_exists": "Shor's algorithm recovers a secp256k1 private key from its public key, and every address that has ever sent a transaction has published one. Adding a post-quantum key changes nothing unless it can do something the classical key cannot \u2014 so here the controller can never withdraw, never redirect recovery, and is capped by a rolling outflow limit, while only the post-quantum guardian can sweep and rotate.",
+  "standard": "WOTS+ (RFC 8391) over keccak256, n=32 w=16",
+  "tags": [
+    "post-quantum",
+    "quantum-resistant",
+    "wots",
+    "recovery",
+    "agent-finance",
+    "erc-agm",
+    "hash-based-signatures"
+  ],
+  "provenance": {
+    "verified": true,
+    "verification_method": "deployed bytecode keccak match vs eth_getCode (immutable-aware)",
+    "compiler": "0.8.24",
+    "creator": "0x70997970c51812dc3a010c7d01b50e0d17dc79c8",
+    "creation_tx": "0xf583af43c242555eddb3a19a04a3a48c664ff0ff0ee905106554bb8f8066c2f7",
+    "bytecode_size_bytes": 7066,
+    "source_chars": 27523
+  },
+  "deployments": [
+    {
+      "network": "creditchain-testnet",
+      "chain_id": 2026042404,
+      "address": "0x20Fbd46DeEd5EEDEB6e5c87eeB31924e9CA312ad",
+      "explorer": "https://scan.creditchain.org/address/0x20Fbd46DeEd5EEDEB6e5c87eeB31924e9CA312ad?net=testnet",
+      "verify_api": "https://api-testnet.creditchain.org/v1/contracts/0x20Fbd46DeEd5EEDEB6e5c87eeB31924e9CA312ad"
+    }
+  ],
+  "interface": {
+    "functions": [
+      "allowRecipient",
+      "armGuardian",
+      "breakGlass",
+      "breakGlassDigest",
+      "controller",
+      "frozen",
+      "fundMandate",
+      "guardian",
+      "isArmed",
+      "mandateCount",
+      "mandateIds",
+      "openMandate",
+      "outflowLimit",
+      "outflowRemaining",
+      "outflowWindow",
+      "recoveryAddress",
+      "vault",
+      "windowOutflow",
+      "windowStart"
+    ],
+    "events": [
+      "BreakGlass",
+      "ControllerRotated",
+      "GuardianArmed",
+      "MandateOpened"
+    ],
+    "errors": [
+      "AlreadyArmed",
+      "BadSignatureLength",
+      "Frozen",
+      "GuardianConsumed",
+      "InvalidQuantumSignature",
+      "NotArmed",
+      "NotController",
+      "OutflowExceeded",
+      "SweepFailed",
+      "ZeroAddress"
+    ],
+    "abi_entries": 35
+  },
+  "enforced_rails": [
+    "Controller has NO withdraw function \u2014 the ABI contains no value-extraction path",
+    "Controller cannot change the recovery address; it is frozen when the guardian is armed",
+    "Controller outflow is capped per rolling window",
+    "Recovery destination is bound into the signed digest, so a signature seen in the mempool cannot be redirected",
+    "Digest binds chainId and contract address \u2014 no cross-chain or cross-guard replay",
+    "One-time key burned before any external call, so a hostile vault cannot re-enter and replay it",
+    "Break-glass revokes every mandate, pulls back balances, sweeps, and rotates control atomically"
+  ],
+  "evidence": {
+    "tests": {
+      "total": 32,
+      "detail": "13 verifier (incl. 512-run bit-flip fuzzing and a forward-chain forgery attempt) + 4 cross-implementation pinning + 15 guard behaviour",
+      "invariants": [
+        "The Solidity verifier accepts an INDEPENDENT Python reference implementation's signature bytes cold",
+        "The Solidity signer reproduces the Python reference's 2144-byte signature byte-for-byte",
+        "A valid signature never verifies against a different key, seed, digest, guard or chain",
+        "Advancing a chain forward cannot forge a signature \u2014 the checksum forces a chain backward",
+        "A consumed guardian is rejected forever, even with a cryptographically valid signature"
+      ]
+    },
+    "gas": {
+      "verify": "252,606 (2144-byte signature)",
+      "breakGlass": "415,323 measured live"
+    },
+    "audit": null,
+    "audit_status": "UNAUDITED \u2014 no external security audit has been performed."
+  },
+  "known_limitations": [
+    "Not audited by an external firm.",
+    "CreditChain's base layer is still secp256k1 \u2014 this hardens an authority layer, it does not make the chain quantum resistant. See docs/quantum/QUANTUM-RESISTANCE.md for the full per-layer status.",
+    "WOTS+ keys are ONE-TIME. A second signature under the same key leaks enough to forge others; the contract enforces single use, and the ccq wallet refuses to sign twice.",
+    "Bounds a compromised controller, it does not prevent one: the attacker can still leak up to the outflow limit before the guardian is used."
+  ],
+  "source_code": "// SPDX-License-Identifier: MIT\npragma solidity ^0.8.24;\n\n// src/IAgentSpendMandate.sol\n// Copyright (c) CreditChain Research Team. All rights reserved.\n\n/// @title IAgentSpendMandate \u2014 the ERC-AGM standard interface\n/// @notice Canonical interface for a chain-enforced, bounded, revocable\n/// spending mandate granted by an owner to an autonomous agent.\n///\n/// An implementation custodies value on behalf of an owner and lets a delegated\n/// `agent` spend it autonomously, while the contract enforces a budget cap, a\n/// per-transaction maximum, a rolling-window rate limit, an optional recipient\n/// allowlist, and an expiry. The owner can revoke at any time and reclaim the\n/// unspent balance. No party other than the mandate's owner may move its funds.\n///\n/// See ERC-AGM (`docs/standards/ERC-AGM.md`) for the full specification.\n/// Reference implementation: `AgentSpendVault.sol`.\ninterface IAgentSpendMandate {\n    /// @dev The full state of a mandate. Implementations MAY store this layout\n    /// differently but MUST expose it through `mandate(uint256)`.\n    struct Mandate {\n        address owner;\n        address agent;\n        uint256 budget;\n        uint256 spent;\n        uint256 balance;\n        uint256 perTxMax;\n        uint256 windowLimit;\n        uint64 windowSeconds;\n        uint64 windowStart;\n        uint256 windowSpent;\n        uint64 expiry;\n        bool allowlistEnabled;\n        bool revoked;\n    }\n\n    // \u2500\u2500 events \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n\n    event MandateCreated(\n        uint256 indexed mandateId,\n        address indexed owner,\n        address indexed agent,\n        uint256 budget,\n        uint256 perTxMax,\n        uint256 windowLimit,\n        uint64 windowSeconds,\n        uint64 expiry,\n        bool allowlistEnabled\n    );\n    event MandateFunded(uint256 indexed mandateId, address indexed from, uint256 amount, uint256 newBalance);\n    event RecipientAllowed(uint256 indexed mandateId, address indexed recipient, bool allowed);\n    event AgentPayment(\n        uint256 indexed mandateId,\n        address indexed agent,\n        address indexed recipient,\n        uint256 amount,\n        bytes32 taskRef,\n        uint256 totalSpent\n    );\n    event MandateRevoked(uint256 indexed mandateId, address indexed owner, uint256 refunded);\n    event Withdrawn(uint256 indexed mandateId, address indexed owner, uint256 amount);\n\n    // \u2500\u2500 errors \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n\n    error NotOwner();\n    error NotAgent();\n    error MandateInactive();\n    error ZeroAddress();\n    error ZeroAmount();\n    error BudgetExceeded();\n    error PerTxExceeded();\n    error WindowExceeded();\n    error RecipientNotAllowed();\n    error InsufficientBalance();\n    error TransferFailed();\n\n    // \u2500\u2500 mutating \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n\n    /// @notice Create and fund a mandate. The value sent becomes its balance.\n    /// MUST emit {MandateCreated} (and {MandateFunded} if value > 0).\n    function createMandate(\n        address agent,\n        uint256 budget,\n        uint256 perTxMax,\n        uint256 windowLimit,\n        uint64 windowSeconds,\n        uint64 expiry,\n        bool allowlistEnabled\n    ) external payable returns (uint256 mandateId);\n\n    /// @notice Top up a mandate's balance. Implementations MAY allow anyone to fund.\n    function fundMandate(uint256 mandateId) external payable;\n\n    /// @notice Owner sets allowlist membership for a recipient. MUST revert {NotOwner}\n    /// for non-owners.\n    function allowRecipient(uint256 mandateId, address recipient, bool allowed) external;\n\n    /// @notice The agent spends to a recipient. MUST be callable only by the\n    /// mandate's agent and MUST enforce every rail (expiry, allowlist, per-tx,\n    /// budget, balance, rolling window), reverting with the corresponding error\n    /// and moving no value on violation. MUST emit {AgentPayment} on success.\n    function spend(uint256 mandateId, address recipient, uint256 amount, bytes32 taskRef) external;\n\n    /// @notice Owner kill switch: deactivates the mandate and refunds the unspent\n    /// balance. After this the agent MUST NOT be able to spend. MUST emit {MandateRevoked}.\n    function revoke(uint256 mandateId) external;\n\n    /// @notice Owner reclaims part of the unspent balance without revoking.\n    /// MUST emit {Withdrawn}.\n    function withdraw(uint256 mandateId, uint256 amount) external;\n\n    // \u2500\u2500 views \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n\n    /// @notice The full mandate record.\n    function mandate(uint256 mandateId) external view returns (Mandate memory);\n\n    /// @notice The most the agent could spend right now under all rails combined.\n    function spendableNow(uint256 mandateId) external view returns (uint256);\n\n    /// @notice Number of mandates created (also the id of the most recent).\n    function mandateCount() external view returns (uint256);\n\n    /// @notice Whether a recipient is allowlisted for a mandate.\n    function allowlisted(uint256 mandateId, address recipient) external view returns (bool);\n}\n\n// src/quantum/WOTSPlus.sol\n\n/// @title WOTSPlus \u2014 Winternitz One-Time Signatures for the EVM\n/// @notice A post-quantum signature verifier whose ONLY cryptographic assumption\n///         is that keccak256 behaves like a hash function.\n///\n/// WHY THIS EXISTS\n/// ---------------\n/// Every EVM account today is protected by secp256k1 ECDSA. ECDSA rests on the\n/// discrete-log problem, which Shor's algorithm solves in polynomial time on a\n/// sufficiently large quantum computer. When such a machine exists, every\n/// address whose public key has ever been revealed \u2014 which is every address that\n/// has ever sent a transaction \u2014 can be forged at will.\n///\n/// Hash-based signatures are the one mature family that Shor does not touch.\n/// Grover's algorithm gives only a quadratic speedup on preimage search, so a\n/// 256-bit hash retains ~128 bits of security against a quantum adversary. That\n/// is why NIST's SLH-DSA (FIPS 205, formerly SPHINCS+) is hash-based, and why\n/// WOTS+ \u2014 SLH-DSA's own internal one-time signature \u2014 is the right primitive to\n/// bring on-chain first: the EVM already has keccak256 as a cheap opcode, so no\n/// new precompile and no consensus change is required to use it.\n///\n/// CONSTRUCTION\n/// ------------\n/// WOTS+ as specified in RFC 8391 \u00a73.1, instantiated with keccak256 and\n/// parameters n = 32 bytes, w = 16:\n///\n///   len1 = ceil(8n / lg(w))                 = 64 message digits (base 16)\n///   len2 = floor(lg(len1(w-1)) / lg(w)) + 1 =  3 checksum digits\n///   len  = len1 + len2                      = 67 hash chains\n///\n/// A signature is `len` chain values (67 x 32 = 2144 bytes). Verification walks\n/// each chain forward from where the signature stopped to the chain's end and\n/// checks that the resulting public key matches the committed one.\n///\n/// The chaining function applies a per-step key and bitmask derived from a public\n/// seed (the \"+\" in WOTS+). This is not decoration: it reduces the security\n/// requirement on the hash from collision resistance to second-preimage\n/// resistance. That matters here specifically because quantum collision search\n/// (Brassard-Hoyer-Tapp) scales as 2^(n/3) while quantum preimage search stays at\n/// 2^(n/2) \u2014 so the bitmasked construction keeps the full ~128-bit quantum margin\n/// that a collision-dependent construction would give up.\n///\n/// ONE-TIME \u2014 THIS IS LOAD-BEARING\n/// -------------------------------\n/// A WOTS+ key may sign EXACTLY ONE message, ever. Signing a second message\n/// reveals lower chain positions for at least one digit, from which an attacker\n/// can derive signatures for other messages by hashing forward. Verification here\n/// is a pure function and CANNOT enforce single use. Every caller MUST record the\n/// public key as consumed on first successful verification and refuse it after.\n/// `QuantumGuard` shows the intended pattern.\n///\n/// SECURITY STATUS: unaudited. See docs/quantum/QUANTUM-RESISTANCE.md.\nlibrary WOTSPlus {\n    /// @dev Winternitz parameter. w = 16 -> 4 bits per chain, 15 hashes max per chain.\n    uint256 internal constant W = 16;\n    /// @dev Message digits: a 256-bit digest carries 64 base-16 digits.\n    uint256 internal constant LEN1 = 64;\n    /// @dev Checksum digits: max checksum 64*15 = 960 < 2^12, so 3 base-16 digits.\n    uint256 internal constant LEN2 = 3;\n    /// @dev Total hash chains, and therefore signature elements.\n    uint256 internal constant LEN = 67;\n    /// @dev Signature size in bytes: LEN * 32.\n    uint256 internal constant SIG_BYTES = 2144;\n\n    /// @dev Domain separators keep the three hash roles disjoint, so a value\n    ///      produced in one role can never be replayed as a value in another.\n    bytes1 private constant D_F = 0x00; // chain step\n    bytes1 private constant D_PRF = 0x03; // key / bitmask derivation\n    bytes1 private constant D_PK = 0x07; // public-key compression\n\n    error BadSignatureLength(uint256 got, uint256 want);\n\n    /// @notice Verify a WOTS+ signature against a compressed public key.\n    /// @param digest    The 32-byte message digest that was signed.\n    /// @param sig       `LEN * 32` bytes: one chain value per digit.\n    /// @param pubSeed   Public randomization seed bound to this key.\n    /// @param pkHash    `compress(pubSeed, publicKey)` recorded when the key was armed.\n    /// @return ok       True when the signature is valid for this digest and key.\n    ///\n    /// @dev Pure and constant-shape: it always walks every chain to its end, so\n    ///      cost depends on the digest, never on secret material. The caller is\n    ///      responsible for one-time enforcement (see the contract notice above).\n    function verify(bytes32 digest, bytes memory sig, bytes32 pubSeed, bytes32 pkHash)\n        internal\n        pure\n        returns (bool ok)\n    {\n        if (sig.length != SIG_BYTES) revert BadSignatureLength(sig.length, SIG_BYTES);\n\n        uint8[LEN] memory digits = toDigits(digest);\n\n        // Walk each chain from the signature's stopping point to the chain end.\n        // Chain i was advanced digits[i] steps by the signer; the remaining\n        // (W-1 - digits[i]) steps reconstruct the public-key element.\n        bytes32[LEN] memory pk;\n        for (uint256 i = 0; i < LEN; ++i) {\n            bytes32 node;\n            assembly (\"memory-safe\") {\n                // sig is `bytes`: skip the 32-byte length prefix, then index.\n                node := mload(add(add(sig, 0x20), mul(i, 0x20)))\n            }\n            pk[i] = chain(node, digits[i], W - 1, pubSeed, i);\n        }\n\n        return compress(pubSeed, pk) == pkHash;\n    }\n\n    /// @notice Compress a full WOTS+ public key to the single word stored on-chain.\n    /// @dev Binding `pubSeed` into the commitment stops an attacker from pairing a\n    ///      captured public key with a seed of their own choosing.\n    function compress(bytes32 pubSeed, bytes32[LEN] memory pk) internal pure returns (bytes32) {\n        return keccak256(abi.encodePacked(D_PK, pubSeed, pk));\n    }\n\n    /// @notice Advance a chain value from step `from` (inclusive) to `to` (exclusive).\n    /// @dev The RFC 8391 chaining function. Each step derives a fresh key and\n    ///      bitmask from (pubSeed, chain index, step index) so that no two steps\n    ///      anywhere in the key ever share a hash input structure.\n    ///\n    ///      Written in assembly over two reusable scratch buffers. The equivalent\n    ///      `abi.encodePacked` form allocates three fresh byte arrays per step and\n    ///      costs ~510k gas to verify a signature; hashing out of fixed buffers\n    ///      removes ~3000 allocations and their memory-expansion cost. The\n    ///      hash inputs are byte-for-byte identical either way, which the\n    ///      Python reference vectors in WOTSPlus.t.sol independently confirm.\n    ///\n    ///      Buffer layouts (byte offsets):\n    ///        PRF at p : [0]=0x03  [1..32]=pubSeed  [33..34]=chainIndex  [35..36]=step  [37]=j\n    ///        F   at q : [0]=0x00  [1..32]=key      [33..64]=x^mask\n    function chain(bytes32 x, uint256 from, uint256 to, bytes32 pubSeed, uint256 chainIndex)\n        internal\n        pure\n        returns (bytes32)\n    {\n        assembly (\"memory-safe\") {\n            let p := mload(0x40)\n            let q := add(p, 64)\n            mstore(0x40, add(p, 160)) // reserve both buffers; never freed, scoped to the call\n\n            // Fields constant for the whole chain are written once.\n            mstore8(p, 0x03) // D_PRF\n            mstore(add(p, 1), pubSeed)\n            mstore8(add(p, 33), shr(8, chainIndex))\n            mstore8(add(p, 34), chainIndex)\n            mstore8(q, 0x00) // D_F\n\n            for { let i := from } lt(i, to) { i := add(i, 1) } {\n                mstore8(add(p, 35), shr(8, i))\n                mstore8(add(p, 36), i)\n\n                mstore8(add(p, 37), 0)\n                let key := keccak256(p, 38)\n                mstore8(add(p, 37), 1)\n                let mask := keccak256(p, 38)\n\n                mstore(add(q, 1), key)\n                mstore(add(q, 33), xor(x, mask))\n                x := keccak256(q, 65)\n            }\n        }\n        return x;\n    }\n\n    /// @notice Expand a digest into the 67 base-16 digits that WOTS+ actually signs.\n    /// @dev The checksum is what makes forgery hard. Chains only run forward, so an\n    ///      attacker can always raise a message digit; the checksum digits are the\n    ///      complement of the message digits, so raising any message digit lowers\n    ///      the checksum \u2014 which would require running some chain BACKWARD.\n    function toDigits(bytes32 digest) internal pure returns (uint8[LEN] memory digits) {\n        uint256 csum = 0;\n        for (uint256 i = 0; i < LEN1; ++i) {\n            // Big-endian nibbles: high nibble of byte 0 is digit 0.\n            uint8 d = uint8((uint256(digest) >> (252 - 4 * i)) & 0x0f);\n            digits[i] = d;\n            csum += (W - 1) - d;\n        }\n        // csum <= 64 * 15 = 960 < 2^12, so three base-16 digits hold it exactly.\n        // This matches RFC 8391's left-shift-then-base_w for these parameters.\n        digits[LEN1] = uint8((csum >> 8) & 0x0f);\n        digits[LEN1 + 1] = uint8((csum >> 4) & 0x0f);\n        digits[LEN1 + 2] = uint8(csum & 0x0f);\n    }\n}\n\n// src/quantum/QuantumGuard.sol\n\n/// @title QuantumGuard \u2014 a break-glass authority that survives a broken ECDSA key\n/// @notice Holds funds and drives ERC-AGM mandates on behalf of an owner, under two\n///         separate authorities: a normal-operations ECDSA controller, and a\n///         post-quantum guardian that can override it.\n///\n/// THE THREAT, STATED HONESTLY\n/// --------------------------\n/// Shor's algorithm recovers a secp256k1 private key from its public key. Every\n/// EVM address that has ever sent a transaction has published its public key, so\n/// on the day a cryptographically-relevant quantum computer exists, those keys\n/// are forgeable. Adding a post-quantum key next to an ECDSA key does NOT by\n/// itself help: if both can do the same things, the attacker simply uses the one\n/// they broke.\n///\n/// A break-glass key is only worth having if it can do something the ECDSA key\n/// CANNOT. That asymmetry is the entire design of this contract:\n///\n///   controller (ECDSA)         guardian (post-quantum, hash-based)\n///   ------------------         ----------------------------------\n///   create mandates            revoke every mandate\n///   fund mandates              pull all mandate balances back\n///   allowlist recipients       sweep the full balance to `recoveryAddress`\n///                              replace the controller\n///   BOUNDED by a rolling       NOT bounded\n///   outflow limit\n///   CANNOT withdraw\n///   CANNOT change controller\n///   CANNOT change recovery addr\n///\n/// So an attacker holding a forged controller key cannot withdraw anything, cannot\n/// redirect recovery, and cannot exceed the outflow limit committed when the\n/// guardian was armed. The worst case degrades from \"instant total loss\" to \"a\n/// bounded leak, then guaranteed recovery\". That is a real security property, and\n/// it is the honest limit of what this contract claims.\n///\n/// WHY THE RECOVERY ADDRESS IS COMMITTED AT ARM TIME\n/// ------------------------------------------------\n/// A break-glass signature is public the moment it reaches the mempool, so it must\n/// be assumed stolen. Because the destination was fixed when the key was armed and\n/// is bound into the signed digest, a stolen signature can only do the one thing\n/// the owner already wanted: move funds to the owner's own recovery address. Anyone\n/// may relay it; nobody can redirect it. Front-running is therefore harmless here\n/// by construction rather than by mitigation.\n///\n/// ONE-TIME, AND ENFORCED HERE\n/// ---------------------------\n/// WOTS+ keys sign exactly once; a second signature leaks enough to forge. The\n/// library cannot enforce that because verification is pure, so this contract does:\n/// the guardian is marked consumed before any external call, and a consumed\n/// guardian is rejected forever after.\n///\n/// SECURITY STATUS: unaudited. Test CCC has no monetary value.\ncontract QuantumGuard {\n    // \u2500\u2500 roles and state \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n\n    /// @notice Day-to-day ECDSA authority. Deliberately limited (see table above).\n    address public controller;\n\n    /// @notice Where a break-glass sends everything. Fixed when the guardian is armed.\n    address public recoveryAddress;\n\n    /// @notice The ERC-AGM vault this guard operates on.\n    IAgentSpendMandate public immutable vault;\n\n    struct Guardian {\n        bytes32 pkHash; // commitment to the WOTS+ public key\n        bytes32 pubSeed; // public randomisation seed\n        uint64 armedAt;\n        bool consumed; // one-time: true after a successful break-glass\n    }\n\n    Guardian public guardian;\n\n    /// @notice Rolling cap on how much the controller may push into mandates.\n    uint256 public outflowLimit;\n    uint64 public outflowWindow;\n    uint64 public windowStart;\n    uint256 public windowOutflow;\n\n    /// @notice Set by break-glass. A frozen guard accepts no controller action ever again.\n    bool public frozen;\n\n    /// @notice Mandates this guard created, so break-glass can sweep them all.\n    uint256[] public mandateIds;\n\n    // \u2500\u2500 events \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n\n    event GuardianArmed(bytes32 indexed pkHash, address indexed recoveryAddress, uint256 outflowLimit, uint64 outflowWindow);\n    event MandateOpened(uint256 indexed mandateId, address indexed agent, uint256 amount);\n    event BreakGlass(bytes32 indexed pkHash, address indexed recoveryAddress, uint256 swept, uint256 mandatesRevoked);\n    event ControllerRotated(address indexed from, address indexed to);\n\n    // \u2500\u2500 errors \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n\n    error NotController();\n    error AlreadyArmed();\n    error NotArmed();\n    error GuardianConsumed();\n    error Frozen();\n    error OutflowExceeded(uint256 requested, uint256 remaining);\n    error InvalidQuantumSignature();\n    error ZeroAddress();\n    error SweepFailed();\n\n    // \u2500\u2500 construction \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n\n    constructor(address vault_, address controller_) {\n        if (vault_ == address(0) || controller_ == address(0)) revert ZeroAddress();\n        vault = IAgentSpendMandate(vault_);\n        controller = controller_;\n    }\n\n    receive() external payable { }\n\n    modifier onlyController() {\n        if (msg.sender != controller) revert NotController();\n        if (frozen) revert Frozen();\n        _;\n    }\n\n    // \u2500\u2500 arming the post-quantum guardian \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n\n    /// @notice Commit to a post-quantum guardian key and the terms it enforces.\n    /// @param pkHash    `WOTSPlus.compress(pubSeed, publicKey)`, computed off-chain.\n    /// @param pubSeed   Public randomisation seed for the key.\n    /// @param recovery  Where a break-glass will send everything. Immutable once armed.\n    /// @param limit     Maximum the controller may push into mandates per window.\n    /// @param window    Length of the rolling outflow window, in seconds.\n    ///\n    /// @dev Armable exactly once. Re-arming is deliberately impossible: if the\n    ///      controller key were forged, the attacker's first move would otherwise be\n    ///      to re-arm with a guardian of their own and lock the real owner out. A\n    ///      fresh guardian therefore requires a fresh QuantumGuard.\n    ///\n    ///      Only the commitment is ever on-chain. The WOTS+ secret key is generated\n    ///      and stored off-chain \u2014 see reference/wotsplus.py \u2014 and the public key is\n    ///      revealed only in the single break-glass signature.\n    function armGuardian(bytes32 pkHash, bytes32 pubSeed, address recovery, uint256 limit, uint64 window)\n        external\n        onlyController\n    {\n        if (guardian.pkHash != bytes32(0)) revert AlreadyArmed();\n        if (recovery == address(0)) revert ZeroAddress();\n        if (pkHash == bytes32(0)) revert ZeroAddress();\n\n        guardian = Guardian({ pkHash: pkHash, pubSeed: pubSeed, armedAt: uint64(block.timestamp), consumed: false });\n        recoveryAddress = recovery;\n        outflowLimit = limit;\n        outflowWindow = window;\n        windowStart = uint64(block.timestamp);\n\n        emit GuardianArmed(pkHash, recovery, limit, window);\n    }\n\n    // \u2500\u2500 normal operations (bounded ECDSA authority) \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n\n    /// @notice Open a mandate on the vault, owned by this guard, funded from its balance.\n    /// @dev Counts against the rolling outflow limit. This is the ONLY way value\n    ///      leaves the guard under controller authority, which is what bounds the\n    ///      damage a forged controller key can do.\n    function openMandate(\n        address agent,\n        uint256 budget,\n        uint256 perTxMax,\n        uint256 windowLimit,\n        uint64 windowSeconds,\n        uint64 expiry,\n        bool allowlistEnabled,\n        uint256 fundAmount\n    ) external onlyController returns (uint256 mandateId) {\n        if (!isArmed()) revert NotArmed();\n        _chargeOutflow(fundAmount);\n\n        mandateId = vault.createMandate{ value: fundAmount }(\n            agent, budget, perTxMax, windowLimit, windowSeconds, expiry, allowlistEnabled\n        );\n        mandateIds.push(mandateId);\n        emit MandateOpened(mandateId, agent, fundAmount);\n    }\n\n    /// @notice Add funds to a mandate this guard owns. Counts against the outflow limit.\n    function fundMandate(uint256 mandateId, uint256 amount) external onlyController {\n        _chargeOutflow(amount);\n        vault.fundMandate{ value: amount }(mandateId);\n    }\n\n    /// @notice Allowlist a recipient on a mandate this guard owns.\n    /// @dev Moves no value, so it is not charged against the outflow limit.\n    function allowRecipient(uint256 mandateId, address recipient, bool allowed) external onlyController {\n        vault.allowRecipient(mandateId, recipient, allowed);\n    }\n\n    /// @dev Rolling window. The window resets lazily on first use after it lapses,\n    ///      so an idle guard does not accumulate unused allowance.\n    function _chargeOutflow(uint256 amount) private {\n        if (outflowWindow > 0 && block.timestamp >= windowStart + outflowWindow) {\n            windowStart = uint64(block.timestamp);\n            windowOutflow = 0;\n        }\n        uint256 used = windowOutflow + amount;\n        if (used > outflowLimit) revert OutflowExceeded(amount, outflowLimit - windowOutflow);\n        windowOutflow = used;\n    }\n\n    // \u2500\u2500 break glass (post-quantum authority) \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n\n    /// @notice The digest a guardian signs to trigger recovery.\n    /// @dev Binds the chain id and this contract's address so a signature can never\n    ///      be replayed onto another chain or another guard, and binds the recovery\n    ///      address so a signature observed in the mempool cannot be repurposed.\n    ///      No nonce is needed: the key is one-time and burned on use.\n    function breakGlassDigest() public view returns (bytes32) {\n        return keccak256(\n            abi.encode(\n                \"CreditChain/QuantumGuard/breakGlass/v1\", block.chainid, address(this), recoveryAddress, guardian.pkHash\n            )\n        );\n    }\n\n    /// @notice Revoke everything, pull all funds back, sweep to `recoveryAddress`,\n    ///         and hand control to it \u2014 authorised by a post-quantum signature.\n    /// @param sig The 2144-byte WOTS+ signature over `breakGlassDigest()`.\n    ///\n    /// @dev Callable by ANYONE holding a valid signature. That is intentional: in a\n    ///      recovery the owner may have no working key and no gas, so a relayer must\n    ///      be able to submit on their behalf. It is safe because the destination is\n    ///      fixed and signed.\n    ///\n    ///      Ordering matters: the guardian is consumed and the guard frozen BEFORE\n    ///      any external call, so a hostile vault cannot re-enter into a second\n    ///      break-glass and replay the one-time key.\n    function breakGlass(bytes calldata sig) external {\n        Guardian memory g = guardian;\n        if (g.pkHash == bytes32(0)) revert NotArmed();\n        if (g.consumed) revert GuardianConsumed();\n\n        if (!WOTSPlus.verify(breakGlassDigest(), sig, g.pubSeed, g.pkHash)) {\n            revert InvalidQuantumSignature();\n        }\n\n        // Burn the one-time key and freeze controller authority first.\n        guardian.consumed = true;\n        frozen = true;\n\n        address recovery = recoveryAddress;\n        uint256 revoked = _drainMandates();\n\n        uint256 balance = address(this).balance;\n        (bool sent,) = recovery.call{ value: balance }(\"\");\n        if (!sent) revert SweepFailed();\n\n        address previous = controller;\n        controller = recovery;\n\n        emit ControllerRotated(previous, recovery);\n        emit BreakGlass(g.pkHash, recovery, balance, revoked);\n    }\n\n    /// @dev Revoke every mandate and pull its unspent balance back into the guard.\n    ///      Failures are tolerated per-mandate: one already-revoked or hostile\n    ///      mandate must never be able to block recovery of all the others.\n    function _drainMandates() private returns (uint256 revoked) {\n        uint256 n = mandateIds.length;\n        for (uint256 i = 0; i < n; ++i) {\n            uint256 id = mandateIds[i];\n            try vault.revoke(id) {\n                revoked++;\n            } catch { }\n            try vault.mandate(id) returns (IAgentSpendMandate.Mandate memory m) {\n                if (m.balance > 0) {\n                    try vault.withdraw(id, m.balance) { } catch { }\n                }\n            } catch { }\n        }\n    }\n\n    // \u2500\u2500 views \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n\n    function isArmed() public view returns (bool) {\n        return guardian.pkHash != bytes32(0) && !guardian.consumed;\n    }\n\n    function mandateCount() external view returns (uint256) {\n        return mandateIds.length;\n    }\n\n    /// @notice How much the controller may still push out in the current window.\n    function outflowRemaining() external view returns (uint256) {\n        if (outflowWindow > 0 && block.timestamp >= windowStart + outflowWindow) return outflowLimit;\n        return outflowLimit - windowOutflow;\n    }\n}\n",
+  "abi": [
+    {
+      "inputs": [
+        {
+          "internalType": "address",
+          "name": "vault_",
+          "type": "address"
+        },
+        {
+          "internalType": "address",
+          "name": "controller_",
+          "type": "address"
+        }
+      ],
+      "stateMutability": "nonpayable",
+      "type": "constructor"
+    },
+    {
+      "stateMutability": "payable",
+      "type": "receive"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "uint256",
+          "name": "mandateId",
+          "type": "uint256"
+        },
+        {
+          "internalType": "address",
+          "name": "recipient",
+          "type": "address"
+        },
+        {
+          "internalType": "bool",
+          "name": "allowed",
+          "type": "bool"
+        }
+      ],
+      "name": "allowRecipient",
+      "outputs": [],
+      "stateMutability": "nonpayable",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "bytes32",
+          "name": "pkHash",
+          "type": "bytes32"
+        },
+        {
+          "internalType": "bytes32",
+          "name": "pubSeed",
+          "type": "bytes32"
+        },
+        {
+          "internalType": "address",
+          "name": "recovery",
+          "type": "address"
+        },
+        {
+          "internalType": "uint256",
+          "name": "limit",
+          "type": "uint256"
+        },
+        {
+          "internalType": "uint64",
+          "name": "window",
+          "type": "uint64"
+        }
+      ],
+      "name": "armGuardian",
+      "outputs": [],
+      "stateMutability": "nonpayable",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "bytes",
+          "name": "sig",
+          "type": "bytes"
+        }
+      ],
+      "name": "breakGlass",
+      "outputs": [],
+      "stateMutability": "nonpayable",
+      "type": "function"
+    },
+    {
+      "inputs": [],
+      "name": "breakGlassDigest",
+      "outputs": [
+        {
+          "internalType": "bytes32",
+          "name": "",
+          "type": "bytes32"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [],
+      "name": "controller",
+      "outputs": [
+        {
+          "internalType": "address",
+          "name": "",
+          "type": "address"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [],
+      "name": "frozen",
+      "outputs": [
+        {
+          "internalType": "bool",
+          "name": "",
+          "type": "bool"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "uint256",
+          "name": "mandateId",
+          "type": "uint256"
+        },
+        {
+          "internalType": "uint256",
+          "name": "amount",
+          "type": "uint256"
+        }
+      ],
+      "name": "fundMandate",
+      "outputs": [],
+      "stateMutability": "nonpayable",
+      "type": "function"
+    },
+    {
+      "inputs": [],
+      "name": "guardian",
+      "outputs": [
+        {
+          "internalType": "bytes32",
+          "name": "pkHash",
+          "type": "bytes32"
+        },
+        {
+          "internalType": "bytes32",
+          "name": "pubSeed",
+          "type": "bytes32"
+        },
+        {
+          "internalType": "uint64",
+          "name": "armedAt",
+          "type": "uint64"
+        },
+        {
+          "internalType": "bool",
+          "name": "consumed",
+          "type": "bool"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [],
+      "name": "isArmed",
+      "outputs": [
+        {
+          "internalType": "bool",
+          "name": "",
+          "type": "bool"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [],
+      "name": "mandateCount",
+      "outputs": [
+        {
+          "internalType": "uint256",
+          "name": "",
+          "type": "uint256"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "uint256",
+          "name": "",
+          "type": "uint256"
+        }
+      ],
+      "name": "mandateIds",
+      "outputs": [
+        {
+          "internalType": "uint256",
+          "name": "",
+          "type": "uint256"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "address",
+          "name": "agent",
+          "type": "address"
+        },
+        {
+          "internalType": "uint256",
+          "name": "budget",
+          "type": "uint256"
+        },
+        {
+          "internalType": "uint256",
+          "name": "perTxMax",
+          "type": "uint256"
+        },
+        {
+          "internalType": "uint256",
+          "name": "windowLimit",
+          "type": "uint256"
+        },
+        {
+          "internalType": "uint64",
+          "name": "windowSeconds",
+          "type": "uint64"
+        },
+        {
+          "internalType": "uint64",
+          "name": "expiry",
+          "type": "uint64"
+        },
+        {
+          "internalType": "bool",
+          "name": "allowlistEnabled",
+          "type": "bool"
+        },
+        {
+          "internalType": "uint256",
+          "name": "fundAmount",
+          "type": "uint256"
+        }
+      ],
+      "name": "openMandate",
+      "outputs": [
+        {
+          "internalType": "uint256",
+          "name": "mandateId",
+          "type": "uint256"
+        }
+      ],
+      "stateMutability": "nonpayable",
+      "type": "function"
+    },
+    {
+      "inputs": [],
+      "name": "outflowLimit",
+      "outputs": [
+        {
+          "internalType": "uint256",
+          "name": "",
+          "type": "uint256"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [],
+      "name": "outflowRemaining",
+      "outputs": [
+        {
+          "internalType": "uint256",
+          "name": "",
+          "type": "uint256"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [],
+      "name": "outflowWindow",
+      "outputs": [
+        {
+          "internalType": "uint64",
+          "name": "",
+          "type": "uint64"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [],
+      "name": "recoveryAddress",
+      "outputs": [
+        {
+          "internalType": "address",
+          "name": "",
+          "type": "address"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [],
+      "name": "vault",
+      "outputs": [
+        {
+          "internalType": "contract IAgentSpendMandate",
+          "name": "",
+          "type": "address"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [],
+      "name": "windowOutflow",
+      "outputs": [
+        {
+          "internalType": "uint256",
+          "name": "",
+          "type": "uint256"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [],
+      "name": "windowStart",
+      "outputs": [
+        {
+          "internalType": "uint64",
+          "name": "",
+          "type": "uint64"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "anonymous": false,
+      "inputs": [
+        {
+          "indexed": true,
+          "internalType": "bytes32",
+          "name": "pkHash",
+          "type": "bytes32"
+        },
+        {
+          "indexed": true,
+          "internalType": "address",
+          "name": "recoveryAddress",
+          "type": "address"
+        },
+        {
+          "indexed": false,
+          "internalType": "uint256",
+          "name": "swept",
+          "type": "uint256"
+        },
+        {
+          "indexed": false,
+          "internalType": "uint256",
+          "name": "mandatesRevoked",
+          "type": "uint256"
+        }
+      ],
+      "name": "BreakGlass",
+      "type": "event"
+    },
+    {
+      "anonymous": false,
+      "inputs": [
+        {
+          "indexed": true,
+          "internalType": "address",
+          "name": "from",
+          "type": "address"
+        },
+        {
+          "indexed": true,
+          "internalType": "address",
+          "name": "to",
+          "type": "address"
+        }
+      ],
+      "name": "ControllerRotated",
+      "type": "event"
+    },
+    {
+      "anonymous": false,
+      "inputs": [
+        {
+          "indexed": true,
+          "internalType": "bytes32",
+          "name": "pkHash",
+          "type": "bytes32"
+        },
+        {
+          "indexed": true,
+          "internalType": "address",
+          "name": "recoveryAddress",
+          "type": "address"
+        },
+        {
+          "indexed": false,
+          "internalType": "uint256",
+          "name": "outflowLimit",
+          "type": "uint256"
+        },
+        {
+          "indexed": false,
+          "internalType": "uint64",
+          "name": "outflowWindow",
+          "type": "uint64"
+        }
+      ],
+      "name": "GuardianArmed",
+      "type": "event"
+    },
+    {
+      "anonymous": false,
+      "inputs": [
+        {
+          "indexed": true,
+          "internalType": "uint256",
+          "name": "mandateId",
+          "type": "uint256"
+        },
+        {
+          "indexed": true,
+          "internalType": "address",
+          "name": "agent",
+          "type": "address"
+        },
+        {
+          "indexed": false,
+          "internalType": "uint256",
+          "name": "amount",
+          "type": "uint256"
+        }
+      ],
+      "name": "MandateOpened",
+      "type": "event"
+    },
+    {
+      "inputs": [],
+      "name": "AlreadyArmed",
+      "type": "error"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "uint256",
+          "name": "got",
+          "type": "uint256"
+        },
+        {
+          "internalType": "uint256",
+          "name": "want",
+          "type": "uint256"
+        }
+      ],
+      "name": "BadSignatureLength",
+      "type": "error"
+    },
+    {
+      "inputs": [],
+      "name": "Frozen",
+      "type": "error"
+    },
+    {
+      "inputs": [],
+      "name": "GuardianConsumed",
+      "type": "error"
+    },
+    {
+      "inputs": [],
+      "name": "InvalidQuantumSignature",
+      "type": "error"
+    },
+    {
+      "inputs": [],
+      "name": "NotArmed",
+      "type": "error"
+    },
+    {
+      "inputs": [],
+      "name": "NotController",
+      "type": "error"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "uint256",
+          "name": "requested",
+          "type": "uint256"
+        },
+        {
+          "internalType": "uint256",
+          "name": "remaining",
+          "type": "uint256"
+        }
+      ],
+      "name": "OutflowExceeded",
+      "type": "error"
+    },
+    {
+      "inputs": [],
+      "name": "SweepFailed",
+      "type": "error"
+    },
+    {
+      "inputs": [],
+      "name": "ZeroAddress",
+      "type": "error"
+    }
+  ]
+}

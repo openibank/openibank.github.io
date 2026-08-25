@@ -6,7 +6,7 @@
     "chain_id": 2026042404,
     "rpc": "https://testnet.creditchain.org"
   },
-  "count": 3,
+  "count": 4,
   "contracts": [
     {
       "slug": "agent-spend-vault",
@@ -60,6 +60,26 @@
       "audited": false,
       "tests": 8,
       "abi_entries": 17
+    },
+    {
+      "slug": "quantum-guard",
+      "name": "QuantumGuard",
+      "summary": "A break-glass authority that survives a broken ECDSA key. Verifies post-quantum WOTS+ signatures on-chain using only keccak256 \u2014 no precompile, no hard fork.",
+      "standard": "WOTS+ (RFC 8391) over keccak256, n=32 w=16",
+      "tags": [
+        "post-quantum",
+        "quantum-resistant",
+        "wots",
+        "recovery",
+        "agent-finance",
+        "erc-agm",
+        "hash-based-signatures"
+      ],
+      "address": "0x20Fbd46DeEd5EEDEB6e5c87eeB31924e9CA312ad",
+      "verified": true,
+      "audited": false,
+      "tests": 32,
+      "abi_entries": 35
     }
   ]
 }
