@@ -20,7 +20,7 @@
         "custody",
         "reference"
       ],
-      "address": "0xcA03Dc4665A8C3603cb4Fd5Ce71Af9649dC00d44",
+      "address": "0xE50680e68451A07810205d0258eb567470Bdf994",
       "verified": true,
       "audited": false,
       "tests": 19,
@@ -37,7 +37,7 @@
         "erc-agm",
         "registry"
       ],
-      "address": "0x2dE080e97B0caE9825375D31f5D0eD5751fDf16D",
+      "address": "0x715Fe5D02eA8297327A90C5Cca96d50b878B3162",
       "verified": true,
       "audited": false,
       "tests": 8,
@@ -55,7 +55,7 @@
         "authorization",
         "composition"
       ],
-      "address": "0x5C7c905B505f0Cf40Ab6600d05e677F717916F6B",
+      "address": "0x30eAD9384E4F673621FAc0042d996f9D8cb3389B",
       "verified": true,
       "audited": false,
       "tests": 8,
@@ -75,7 +75,7 @@
         "erc-agm",
         "hash-based-signatures"
       ],
-      "address": "0x20Fbd46DeEd5EEDEB6e5c87eeB31924e9CA312ad",
+      "address": "0x63B76f6080f2CdF0bed1bD3999c5A34955956b3a",
       "verified": true,
       "audited": false,
       "tests": 32,

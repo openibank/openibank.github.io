@@ -21,7 +21,7 @@ OUT = pathlib.Path(__file__).parent / "api"
 SEED = [
     {
         "slug": "agent-spend-vault",
-        "address": "0xcA03Dc4665A8C3603cb4Fd5Ce71Af9649dC00d44",
+        "address": "0xE50680e68451A07810205d0258eb567470Bdf994",
         "summary": "Chain-enforced, bounded, revocable spending mandate for an AI agent. The owner funds a vault and delegates limited authority; the chain enforces every limit.",
         "why": "An AI agent cannot be given a private key safely. This makes bounded spending authority a first-class on-chain object, so an agent can transact autonomously without anyone handing over custody.",
         "standard": "ERC-AGM",
@@ -50,7 +50,7 @@ SEED = [
     },
     {
         "slug": "agent-reputation",
-        "address": "0x2dE080e97B0caE9825375D31f5D0eD5751fDf16D",
+        "address": "0x715Fe5D02eA8297327A90C5Cca96d50b878B3162",
         "summary": "On-chain reputation for AI agents, accrued only from spending mandates the agent provably served and the real owner attested.",
         "why": "Reputation becomes collateral. An agent's track record is portable and public, so it can earn larger authority over time instead of being trusted blindly.",
         "standard": "ERC-AGM extension",
@@ -73,7 +73,7 @@ SEED = [
     },
     {
         "slug": "reputation-gate",
-        "address": "0x5C7c905B505f0Cf40Ab6600d05e677F717916F6B",
+        "address": "0x30eAD9384E4F673621FAc0042d996f9D8cb3389B",
         "summary": "Makes reputation a precondition for spending. An operator may only spend from a mandate once its on-chain score meets the owner's bar.",
         "why": "Closes the loop between bounded autonomy and earned trust: an agent must earn the right to spend, and keeps it only while its record holds.",
         "standard": "ERC-AGM optional extension",
@@ -94,7 +94,7 @@ SEED = [
     },
     {
         "slug": "quantum-guard",
-        "address": "0x20Fbd46DeEd5EEDEB6e5c87eeB31924e9CA312ad",
+        "address": "0x63B76f6080f2CdF0bed1bD3999c5A34955956b3a",
         "summary": "A break-glass authority that survives a broken ECDSA key. Verifies post-quantum WOTS+ signatures on-chain using only keccak256 — no precompile, no hard fork.",
         "why": "Shor's algorithm recovers a secp256k1 private key from its public key, and every address that has ever sent a transaction has published one. Adding a post-quantum key changes nothing unless it can do something the classical key cannot — so here the controller can never withdraw, never redirect recovery, and is capped by a rolling outflow limit, while only the post-quantum guardian can sweep and rotate.",
         "standard": "WOTS+ (RFC 8391) over keccak256, n=32 w=16",

@@ -17,8 +17,8 @@
     "verified": true,
     "verification_method": "deployed bytecode keccak match vs eth_getCode (immutable-aware)",
     "compiler": "0.8.24",
-    "creator": "0x70997970c51812dc3a010c7d01b50e0d17dc79c8",
-    "creation_tx": "0xf583af43c242555eddb3a19a04a3a48c664ff0ff0ee905106554bb8f8066c2f7",
+    "creator": null,
+    "creation_tx": null,
     "bytecode_size_bytes": 7066,
     "source_chars": 27523
   },
@@ -26,9 +26,9 @@
     {
       "network": "creditchain-testnet",
       "chain_id": 2026042404,
-      "address": "0x20Fbd46DeEd5EEDEB6e5c87eeB31924e9CA312ad",
-      "explorer": "https://scan.creditchain.org/address/0x20Fbd46DeEd5EEDEB6e5c87eeB31924e9CA312ad?net=testnet",
-      "verify_api": "https://api-testnet.creditchain.org/v1/contracts/0x20Fbd46DeEd5EEDEB6e5c87eeB31924e9CA312ad"
+      "address": "0x63B76f6080f2CdF0bed1bD3999c5A34955956b3a",
+      "explorer": "https://scan.creditchain.org/address/0x63B76f6080f2CdF0bed1bD3999c5A34955956b3a?net=testnet",
+      "verify_api": "https://api-testnet.creditchain.org/v1/contracts/0x63B76f6080f2CdF0bed1bD3999c5A34955956b3a"
     }
   ],
   "interface": {
