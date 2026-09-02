@@ -26,9 +26,9 @@
   "agent_spending": {
     "standard": "ERC-AGM",
     "why": "An agent should never hold a user's private key. Instead the owner funds a vault and grants a bounded, revocable mandate; the chain enforces every limit.",
-    "vault": "0xcA03Dc4665A8C3603cb4Fd5Ce71Af9649dC00d44",
-    "reputation": "0x2dE080e97B0caE9825375D31f5D0eD5751fDf16D",
-    "gate": "0x5C7c905B505f0Cf40Ab6600d05e677F717916F6B",
+    "vault": "0xE50680e68451A07810205d0258eb567470Bdf994",
+    "reputation": "0x715Fe5D02eA8297327A90C5Cca96d50b878B3162",
+    "gate": "0x30eAD9384E4F673621FAc0042d996f9D8cb3389B",
     "enforced_rails": [
       "budget cap",
       "per-transaction max",

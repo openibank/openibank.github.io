@@ -219,7 +219,7 @@
     </div>
 
     <p class="sub" style="margin-top:20px">
-      Live at <code>0x20Fbd46DeEd5EEDEB6e5c87eeB31924e9CA312ad</code> — source-verified, bytecode hash matched.
+      Live at <code>0x63B76f6080f2CdF0bed1bD3999c5A34955956b3a</code> — source-verified, bytecode hash matched.
       Manage keys air-gapped with <code>ccq</code>, which writes no secret to disk, opens no socket
       when signing, and never touches a secp256k1 key.
     </p>
@@ -320,7 +320,7 @@ Promise.all(NETS.map(async n=>{
 // Live proof: read every mandate straight from the vault. If the chain is
 // unreachable we say so — we never show a cached number as if it were live.
 (async function(){
-  const VAULT="0xcA03Dc4665A8C3603cb4Fd5Ce71Af9649dC00d44";
+  const VAULT="0xE50680e68451A07810205d0258eb567470Bdf994";
   const call=(data)=>rpc("https://testnet.creditchain.org","eth_call",[{to:VAULT,data},"latest"]);
   const w=(h,i)=>h.slice(2+i*64,2+(i+1)*64);
   try{
