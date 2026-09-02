@@ -168,13 +168,12 @@ function render(list){
     </article>`).join("");
 }
 
-// Forge IDE (Remix-derived) opens a source file passed as base64 in #code=.
-function ideUrl(c){
-  try{
-    const b64 = btoa(unescape(encodeURIComponent(c.source_code || "")))
-                  .replace(/\+/g,"-").replace(/\//g,"_").replace(/=+$/,"");
-    return "https://forge.creditchain.org/#code=" + b64;
-  }catch(e){ return "https://forge.creditchain.org/"; }
+// Studio opens a verified contract by address and lets you call it through your
+// own wallet. It replaces the Remix-derived editor, which never built.
+function studioUrl(c){
+  // Studio selects a contract from location.hash by slug — the same slug this
+  // catalog uses — so the deep link needs no change on the Studio side.
+  return "/studio.html#" + encodeURIComponent(c.slug || "");
 }
 
 function openCard(slug){
@@ -223,7 +222,7 @@ function openCard(slug){
 
       <div class="sec"><h3>Use it</h3>
         <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:10px">
-          <a class="btn" href="${ideUrl(c)}" target="_blank">Open in Forge IDE ↗</a>
+          <a class="btn" href="${studioUrl(c)}">Open in Studio ↗</a>
           <a class="btn" href="api/contracts/${c.slug}.json" target="_blank">Card JSON ↗</a>
           <a class="btn" href="${d.explorer}" target="_blank">On-chain proof ↗</a>
         </div>
