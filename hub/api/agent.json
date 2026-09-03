@@ -1,7 +1,7 @@
 {
   "name": "Forge \u2014 CreditChain contract hub",
   "description": "Discover source-verified smart contracts and deploy them under a chain-enforced spending mandate.",
-  "spec_version": "0.1",
+  "spec_version": "0.2",
   "base_url": "https://forge.creditchain.org/hub",
   "endpoints": {
     "list": {
