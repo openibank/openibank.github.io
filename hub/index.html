@@ -4,18 +4,30 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Forge — AI-Era Smart Contract Hub · CreditChain</title>
+<script>
+/* Theme is chosen on the landing page and stored in localStorage; every page
+   honours it, so the setting is site-wide rather than per-page. Runs in <head>,
+   before first paint, to avoid a flash of the wrong palette. */
+(function(){try{var m=localStorage.getItem("forge.theme")||"system";
+if(m!=="system")document.documentElement.setAttribute("data-theme",m);}catch(e){}})();
+</script>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
 <meta name="description" content="Discover, verify and deploy smart contracts that AI agents can use under chain-enforced spending mandates.">
 <style>
   :root{
     --bg:#0b0d10; --panel:#12161b; --line:#222a33; --ink:#e8edf3; --dim:#8b98a8;
     --acc:#4f9cf9; --ok:#34d399; --warn:#fbbf24; --mono:ui-monospace,SFMono-Regular,Menlo,monospace;
   }
+    :root[data-theme="light"]{--bg:#fbfcfe;--panel:#ffffff;--line:#dfe5ee;--ink:#0d1420;--dim:#55637a;--acc:#1f6feb;--acc2:#7c4dff;--ok:#0f8a5f;--warn:#a86800;--err:#c2410c;color-scheme:light}
+    @media (prefers-color-scheme:light){
+      :root:not([data-theme="dark"]){--bg:#fbfcfe;--panel:#ffffff;--line:#dfe5ee;--ink:#0d1420;--dim:#55637a;--acc:#1f6feb;--acc2:#7c4dff;--ok:#0f8a5f;--warn:#a86800;--err:#c2410c;color-scheme:light}
+    }
   *{box-sizing:border-box}
   body{margin:0;background:var(--bg);color:var(--ink);
     font:15px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}
   a{color:var(--acc);text-decoration:none} a:hover{text-decoration:underline}
   .wrap{max-width:1080px;margin:0 auto;padding:0 20px}
-  header{border-bottom:1px solid var(--line);background:#0d1116;position:sticky;top:0;z-index:10}
+  header{border-bottom:1px solid var(--line);background:var(--panel);position:sticky;top:0;z-index:10}
   .bar{display:flex;align-items:center;gap:14px;height:60px}
   .logo{font-weight:700;letter-spacing:-.02em;font-size:18px}
   .logo span{color:var(--acc)}
@@ -56,7 +68,7 @@
   code,.mono{font-family:var(--mono);font-size:12px;word-break:break-all}
   .warnbox{border:1px solid #fbbf2455;background:#fbbf2410;color:var(--warn);
     padding:10px 12px;border-radius:8px;font-size:13px}
-  .btn{display:inline-block;border:1px solid var(--line);background:#0e1318;color:var(--acc);
+  .btn{display:inline-block;border:1px solid var(--line);background:var(--panel);color:var(--acc);
     border-radius:8px;padding:8px 12px;font-size:13px;text-decoration:none}
   .btn:hover{border-color:var(--acc);text-decoration:none}
   .close{margin-left:auto;background:none;border:1px solid var(--line);color:var(--dim);

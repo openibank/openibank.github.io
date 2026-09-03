@@ -4,15 +4,27 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Forge Studio — read, write and inspect contracts</title>
+<script>
+/* Theme is chosen on the landing page and stored in localStorage; every page
+   honours it, so the setting is site-wide rather than per-page. Runs in <head>,
+   before first paint, to avoid a flash of the wrong palette. */
+(function(){try{var m=localStorage.getItem("forge.theme")||"system";
+if(m!=="system")document.documentElement.setAttribute("data-theme",m);}catch(e){}})();
+</script>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
 <meta name="description" content="Interact with verified CreditChain contracts from the browser — and from an agent, through the same API.">
 <style>
   :root{--bg:#08090c;--panel:#111419;--line:#1f2630;--ink:#e9eef5;--dim:#8a97a8;
     --acc:#5b9dff;--acc2:#a78bfa;--ok:#34d399;--warn:#fbbf24;--err:#f87171;
     --mono:ui-monospace,SFMono-Regular,Menlo,monospace}
+    :root[data-theme="light"]{--bg:#fbfcfe;--panel:#ffffff;--line:#dfe5ee;--ink:#0d1420;--dim:#55637a;--acc:#1f6feb;--acc2:#7c4dff;--ok:#0f8a5f;--warn:#a86800;--err:#c2410c;color-scheme:light}
+    @media (prefers-color-scheme:light){
+      :root:not([data-theme="dark"]){--bg:#fbfcfe;--panel:#ffffff;--line:#dfe5ee;--ink:#0d1420;--dim:#55637a;--acc:#1f6feb;--acc2:#7c4dff;--ok:#0f8a5f;--warn:#a86800;--err:#c2410c;color-scheme:light}
+    }
   *{box-sizing:border-box}
   body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}
   a{color:var(--acc);text-decoration:none}a:hover{text-decoration:underline}
-  header{border-bottom:1px solid var(--line);background:#0b0e13;position:sticky;top:0;z-index:10}
+  header{border-bottom:1px solid var(--line);background:var(--panel);position:sticky;top:0;z-index:10}
   .bar{display:flex;align-items:center;gap:14px;height:56px;padding:0 20px;max-width:1400px;margin:0 auto}
   .logo{font-weight:750}.logo span{color:var(--acc)}
   .grow{flex:1}
@@ -30,7 +42,7 @@
   .item.sel{border-color:var(--acc);background:#5b9dff10}
   .iname{font-weight:640;font-size:14px}
   .imeta{font-size:11.5px;color:var(--dim);font-family:var(--mono);margin-top:3px}
-  pre.code{background:#0b0e13;border:1px solid var(--line);border-radius:9px;padding:14px;
+  pre.code{background:var(--bg);border:1px solid var(--line);border-radius:9px;padding:14px;
     font:12px/1.7 var(--mono);overflow:auto;max-height:calc(100vh - 190px);margin:0;white-space:pre}
   .fn{border:1px solid var(--line);border-radius:9px;margin-bottom:8px;background:var(--panel);overflow:hidden}
   .fnhead{display:flex;align-items:center;gap:8px;padding:9px 11px;cursor:pointer}
@@ -41,7 +53,7 @@
   .t-write{color:var(--warn);border-color:#fbbf2455}
   .fnbody{padding:0 11px 11px;display:none}
   .fn.open .fnbody{display:block}
-  input{width:100%;background:#0b0e13;border:1px solid var(--line);color:var(--ink);
+  input{width:100%;background:var(--bg);border:1px solid var(--line);color:var(--ink);
     border-radius:7px;padding:7px 9px;font:12px var(--mono);margin-bottom:6px}
   input:focus{outline:none;border-color:var(--acc)}
   .out{font:11.5px var(--mono);padding:8px;border-radius:7px;margin-top:6px;word-break:break-all}

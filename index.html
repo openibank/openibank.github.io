@@ -4,11 +4,25 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Forge — where AI agents build and use smart contracts</title>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="/creditchain-mark.svg">
 <meta name="description" content="The contract hub for the AI era: every contract source-verified on-chain, and usable by an AI agent under a spending limit the blockchain enforces.">
 <style>
   :root{--bg:#08090c;--panel:#111419;--line:#1f2630;--ink:#e9eef5;--dim:#8a97a8;
     --acc:#5b9dff;--acc2:#a78bfa;--ok:#34d399;--warn:#fbbf24;
-    --mono:ui-monospace,SFMono-Regular,Menlo,monospace}
+    --head:#08090cd9;--shadow:0 8px 30px #0008;
+    --mono:ui-monospace,SFMono-Regular,Menlo,monospace;color-scheme:dark}
+  /* Light palette. Applied when the reader asks for it, or when the OS asks and
+     they have not overridden it. Every colour is redefined, so nothing inherits
+     a dark value into a light page. */
+  :root[data-theme="light"]{--bg:#fbfcfe;--panel:#ffffff;--line:#dfe5ee;--ink:#0d1420;
+    --dim:#55637a;--acc:#1f6feb;--acc2:#7c4dff;--ok:#0f8a5f;--warn:#a86800;
+    --head:#fbfcfed9;--shadow:0 8px 30px #0d142012;color-scheme:light}
+  @media (prefers-color-scheme:light){
+    :root:not([data-theme="dark"]){--bg:#fbfcfe;--panel:#ffffff;--line:#dfe5ee;--ink:#0d1420;
+      --dim:#55637a;--acc:#1f6feb;--acc2:#7c4dff;--ok:#0f8a5f;--warn:#a86800;
+      --head:#fbfcfed9;--shadow:0 8px 30px #0d142012;color-scheme:light}
+  }
   *{box-sizing:border-box}
   html{scroll-behavior:smooth}
   body{margin:0;background:var(--bg);color:var(--ink);
@@ -16,9 +30,27 @@
     -webkit-font-smoothing:antialiased}
   a{color:var(--acc);text-decoration:none}a:hover{text-decoration:underline}
   .wrap{max-width:1120px;margin:0 auto;padding:0 24px}
-  header{position:sticky;top:0;z-index:20;background:#08090cd9;backdrop-filter:blur(12px);
+  header{position:sticky;top:0;z-index:20;background:var(--head);backdrop-filter:blur(12px);
     border-bottom:1px solid var(--line)}
-  .bar{display:flex;align-items:center;gap:16px;height:62px}
+  .bar{display:flex;align-items:center;gap:14px;min-height:62px;flex-wrap:wrap;padding:9px 0}
+  .brand{display:flex;align-items:center;gap:9px;text-decoration:none;color:var(--ink)}
+  .brand:hover{text-decoration:none}
+  .brand img{width:26px;height:26px;border-radius:7px;display:block}
+  .navlinks{display:flex;align-items:center;gap:16px;flex-wrap:wrap}
+  .barctl{display:flex;align-items:center;gap:8px;margin-left:auto}
+  .sel{background:var(--panel);color:var(--ink);border:1px solid var(--line);
+    border-radius:8px;padding:6px 9px;font-size:13px;font-family:inherit;cursor:pointer}
+  .menu{display:none;position:relative}
+  .menu>summary{list-style:none;cursor:pointer;border:1px solid var(--line);
+    background:var(--panel);border-radius:8px;padding:7px 11px;font-size:14px;color:var(--ink)}
+  .menu>summary::-webkit-details-marker{display:none}
+  .sheet{display:flex;flex-direction:column;gap:2px;position:absolute;right:0;top:calc(100% + 9px);
+    min-width:220px;background:var(--panel);border:1px solid var(--line);border-radius:12px;
+    padding:8px 14px 12px;box-shadow:var(--shadow);z-index:30}
+  .sheet .nav{padding:9px 2px;font-size:15px;border-bottom:1px solid var(--line)}
+  .sheet .nav:last-child{border-bottom:none}
+  @media (max-width:1040px){ .navlinks{display:none} .menu{display:block} }
+  @media (max-width:560px){ .tag{display:none} .cta{padding:7px 12px;font-size:13px} }
   .logo{font-weight:750;font-size:19px;letter-spacing:-.02em}.logo span{color:var(--acc)}
   .tag{font-size:11px;color:var(--dim);border:1px solid var(--line);padding:3px 9px;border-radius:99px}
   .grow{flex:1}
@@ -48,6 +80,8 @@
     background:#0e1219}
   .dot{width:11px;height:11px;border-radius:50%}
   .tt{margin-left:8px;font:12px var(--mono);color:var(--dim)}
+  .code{font:12.5px/1.7 var(--mono);color:var(--ink);background:var(--bg);
+    border:1px solid var(--line);border-radius:8px;padding:10px 12px;overflow-x:auto}
   pre{margin:0;padding:18px;font:12.5px/1.75 var(--mono);overflow-x:auto;white-space:pre}
   .g{color:var(--ok)}.r{color:#f87171}.y{color:var(--warn)}.d{color:var(--dim)}.b{color:var(--ink);font-weight:700}
 
@@ -73,29 +107,150 @@
   .badge{font-size:10.5px;padding:2px 8px;border-radius:99px;border:1px solid;white-space:nowrap}
   .b-ok{color:var(--ok);border-color:#34d39955;background:#34d39912}
   .b-warn{color:var(--warn);border-color:#fbbf2455;background:#fbbf2412}
-  code{font:12.5px var(--mono);background:#0e1218;border:1px solid var(--line);
+  code{font:12.5px var(--mono);background:var(--panel);border:1px solid var(--line);
     padding:2px 6px;border-radius:6px}
   footer{border-top:1px solid var(--line);padding:34px 0 50px;color:var(--dim);font-size:13.5px}
   .disc{border:1px solid #fbbf2433;background:#fbbf2409;color:#d7c08a;padding:12px 15px;
     border-radius:10px;font-size:13px;margin-top:18px}
 </style>
+<script>
+/* Locale + theme.
+   Both are applied before first paint where possible, so a reader who chose
+   light does not get a dark flash, and a Chinese reader does not see English
+   swapped out under them.
+
+   Coverage is deliberate rather than total: navigation, controls, headings and
+   ledes are translated. Long body copy stays in English for now — a wrong
+   translation of a sentence about custody or audit status is worse than an
+   untranslated one, and these are finance claims. */
+const I18N = {
+  en: {
+    navProof:"Live proof", navCatalog:"Catalog", navHow:"How it works",
+    navQuantum:"Post-quantum", navBuild:"Build", navNetwork:"Network",
+    navStudio:"Studio", navAgentApi:"Agent API",
+    ctaBrowse:"Browse catalog", ctaConnect:"Connect wallet",
+    themeSystem:"System", themeDark:"Dark", themeLight:"Light",
+    aiTitle:"AI finance, native to the chain",
+    aiLede:"Most chains bolt agents on afterwards. CreditChain puts the agent's authority in the protocol, where it can be enforced instead of promised.",
+    buildTitle:"A professional contract workbench",
+    buildLede:"Coming from Remix? Everything you know still applies — CreditChain is EVM-equivalent. What changes is what you can build against.",
+  },
+  zh: {
+    navProof:"链上实证", navCatalog:"合约目录", navHow:"工作原理",
+    navQuantum:"后量子", navBuild:"开发", navNetwork:"网络",
+    navStudio:"Studio", navAgentApi:"Agent API",
+    ctaBrowse:"浏览目录", ctaConnect:"连接钱包",
+    themeSystem:"跟随系统", themeDark:"深色", themeLight:"浅色",
+    aiTitle:"AI 金融，原生于链",
+    aiLede:"多数公链把 AI 代理作为事后附加。CreditChain 把代理的权限写进协议，使其可被强制执行，而非仅靠承诺。",
+    buildTitle:"专业的合约开发工作台",
+    buildLede:"从 Remix 迁移？你已掌握的一切依然适用 —— CreditChain 与 EVM 等价。改变的是你可以基于什么来构建。",
+  },
+  es: {
+    navProof:"Prueba en vivo", navCatalog:"Catalogo", navHow:"Como funciona",
+    navQuantum:"Post-cuantico", navBuild:"Construir", navNetwork:"Red",
+    navStudio:"Studio", navAgentApi:"Agent API",
+    ctaBrowse:"Ver catalogo", ctaConnect:"Conectar wallet",
+    themeSystem:"Sistema", themeDark:"Oscuro", themeLight:"Claro",
+    aiTitle:"Finanzas con IA, nativas de la cadena",
+    aiLede:"La mayoria de las cadenas anaden agentes despues. CreditChain pone la autoridad del agente en el protocolo, donde se puede exigir en lugar de prometer.",
+    buildTitle:"Un banco de trabajo profesional para contratos",
+    buildLede:"Vienes de Remix? Todo lo que sabes sigue aplicando — CreditChain es equivalente a EVM. Lo que cambia es contra que puedes construir.",
+  },
+};
+
+function pickLocale(stored){
+  if(stored && stored !== "auto" && I18N[stored]) return stored;
+  const nav = (navigator.languages || [navigator.language || "en"]).map(l => l.toLowerCase());
+  for(const l of nav){
+    if(l.startsWith("zh")) return "zh";
+    if(l.startsWith("es")) return "es";
+    if(l.startsWith("en")) return "en";
+  }
+  return "en";
+}
+
+function applyLocale(code){
+  const dict = I18N[code] || I18N.en;
+  document.documentElement.lang = code;
+  for(const el of document.querySelectorAll("[data-i18n]")){
+    const v = dict[el.dataset.i18n] ?? I18N.en[el.dataset.i18n];
+    if(v != null) el.textContent = v;
+  }
+}
+
+function applyTheme(mode){
+  // "system" means: remove the override and let prefers-color-scheme decide.
+  if(mode === "system") document.documentElement.removeAttribute("data-theme");
+  else document.documentElement.setAttribute("data-theme", mode);
+}
+
+(function(){
+  let storedTheme = "system", storedLang = "auto";
+  try{ storedTheme = localStorage.getItem("forge.theme") || "system";
+       storedLang  = localStorage.getItem("forge.lang")  || "auto"; }catch(e){}
+  applyTheme(storedTheme);
+  document.addEventListener("DOMContentLoaded", () => {
+    applyLocale(pickLocale(storedLang));
+    const t = document.getElementById("theme"), l = document.getElementById("lang");
+    if(t){ t.value = storedTheme;
+      t.addEventListener("change", e => { applyTheme(e.target.value);
+        try{ localStorage.setItem("forge.theme", e.target.value); }catch(err){} }); }
+    if(l){ l.value = storedLang;
+      l.addEventListener("change", e => { applyLocale(pickLocale(e.target.value));
+        try{ localStorage.setItem("forge.lang", e.target.value); }catch(err){} }); }
+  });
+})();
+</script>
 </head>
 <body>
 <header><div class="wrap bar">
-  <span class="logo">Forge<span>.</span></span>
-  <span class="tag">CreditChain</span>
-  <div class="grow"></div>
-  <a class="nav" href="#proof">Live proof</a>
-  <a class="nav" href="#catalog">Catalog</a>
-  <a class="nav" href="#how">How it works</a>
-  <a class="nav" href="#quantum">Post-quantum</a>
-  <a class="nav" href="#network">Network</a>
-  <a class="nav" href="#auth">Sign-in</a>
-  <a class="nav" href="/studio.html">Studio</a>
-  <a class="nav" href="hub/api/agent.json">Agent API</a>
-  <a class="cta" href="hub/">Browse catalog</a>
-  <button id="siwe" class="cta" style="border:1px solid var(--line);background:transparent;color:var(--ink);cursor:pointer;margin-left:8px">Connect wallet</button>
-</div></header>
+    <a class="brand" href="/">
+      <img src="/favicon.svg" alt="CreditChain" width="26" height="26">
+      <span class="logo">Forge<span>.</span></span>
+    </a>
+    <span class="tag">CreditChain</span>
+
+    <nav class="navlinks">
+      <a class="nav" href="#proof" data-i18n="navProof"></a>
+      <a class="nav" href="#catalog" data-i18n="navCatalog"></a>
+      <a class="nav" href="#how" data-i18n="navHow"></a>
+      <a class="nav" href="#quantum" data-i18n="navQuantum"></a>
+      <a class="nav" href="#build" data-i18n="navBuild"></a>
+      <a class="nav" href="#network" data-i18n="navNetwork"></a>
+      <a class="nav" href="/studio.html" data-i18n="navStudio"></a>
+      <a class="nav" href="hub/api/agent.json" data-i18n="navAgentApi"></a>
+    </nav>
+
+    <div class="barctl">
+      <select id="lang" class="sel" aria-label="Language">
+        <option value="auto">🌐 Auto</option>
+        <option value="en">English</option>
+        <option value="zh">简体中文</option>
+        <option value="es">Español</option>
+      </select>
+      <select id="theme" class="sel" aria-label="Theme">
+        <option value="system" data-i18n="themeSystem"></option>
+        <option value="dark" data-i18n="themeDark"></option>
+        <option value="light" data-i18n="themeLight"></option>
+      </select>
+      <a class="cta" href="hub/" data-i18n="ctaBrowse"></a>
+      <button id="siwe" class="cta" style="border:1px solid var(--line);background:transparent;color:var(--ink);cursor:pointer" data-i18n="ctaConnect"></button>
+      <details class="menu">
+        <summary>☰</summary>
+        <div class="sheet">
+        <a class="nav" href="#proof" data-i18n="navProof"></a>
+        <a class="nav" href="#catalog" data-i18n="navCatalog"></a>
+        <a class="nav" href="#how" data-i18n="navHow"></a>
+        <a class="nav" href="#quantum" data-i18n="navQuantum"></a>
+        <a class="nav" href="#build" data-i18n="navBuild"></a>
+        <a class="nav" href="#network" data-i18n="navNetwork"></a>
+        <a class="nav" href="/studio.html" data-i18n="navStudio"></a>
+        <a class="nav" href="hub/api/agent.json" data-i18n="navAgentApi"></a>
+        </div>
+      </details>
+    </div>
+  </div></header>
 
 <div class="wrap">
   <section class="hero" style="border:none">
@@ -222,6 +377,60 @@
       Manage keys air-gapped with <code>ccq</code>, which writes no secret to disk, opens no socket
       when signing, and never touches a secp256k1 key.
     </p>
+  </section>
+
+  <section id="ai">
+    <h2 data-i18n="aiTitle">AI finance, native to the chain</h2>
+    <p class="sub" data-i18n="aiLede">Most chains bolt agents on afterwards. CreditChain puts the agent's authority in the protocol, where it can be enforced instead of promised.</p>
+
+    <div class="grid3">
+      <div class="card"><div class="num">01</div><h3>Authority is an on-chain object</h3>
+        <p>On every other chain, "let this agent pay for things" means handing over a key and hoping. On CreditChain a <b>mandate</b> is a first-class object with a budget, a per-transaction cap, a rate limit, an allowlist, an expiry and an owner kill-switch. The chain rejects what the mandate forbids — the agent's software cannot talk its way past it, and neither can whoever steals the agent's key.</p></div>
+      <div class="card"><div class="num">02</div><h3>Reputation earned from real work</h3>
+        <p><code>AgentReputation</code> only accrues from mandates an agent actually served, attested by the owner who funded them. It cannot be bought or self-declared. <code>ReputationGate</code> then lets an owner say "spend only if this agent's score clears my bar", checked at call time — so trust is a number derived from history, not a claim in a profile.</p></div>
+      <div class="card"><div class="num">03</div><h3>Discovery built for machines</h3>
+        <p>An agent asks <code>capabilities.json</code> which contract satisfies an intent, gets the required function set, and <b>checks the answer against the ABI itself</b>. No scraping, no model guessing which contract is right, no trusting our ranking. The hub can be wrong about a name; it cannot be wrong about an interface.</p></div>
+    </div>
+
+    <div class="disc" style="margin-top:22px">
+      <b>Why this matters for finance specifically.</b> Autonomous payments fail on
+      one question: what stops the agent when it is wrong, compromised, or simply
+      looping? Answering it in application code means every integrator re-implements
+      the same limits and one of them gets it wrong. Answering it in the settlement
+      layer means the limit holds for everyone, is auditable by anyone, and survives
+      the agent being fully controlled by an attacker. That is the whole thesis —
+      determinism at the base, intelligence above it.
+    </div>
+  </section>
+
+  <section id="build">
+    <h2 data-i18n="buildTitle">A professional contract workbench</h2>
+    <p class="sub" data-i18n="buildLede">Coming from Remix? Everything you know still applies — CreditChain is EVM-equivalent. What changes is what you can build against.</p>
+
+    <div class="grid3">
+      <div class="card"><div class="num">01</div><h3>Your toolchain, unchanged</h3>
+        <p>Foundry, Hardhat, viem, ethers and Remix all work. Same Solidity, same JSON-RPC, same wallets. Point your existing config at the testnet RPC and deploy — nothing is forked, wrapped or re-specified.</p>
+        <div class="code" style="margin-top:10px">forge create src/MyContract.sol:MyContract \<br>
+        &nbsp;&nbsp;--rpc-url https://testnet.creditchain.org \<br>
+        &nbsp;&nbsp;--chain 2026042404</div></div>
+      <div class="card"><div class="num">02</div><h3>Studio, for reading and calling</h3>
+        <p>Browser-based, no install, no key upload: pick a verified contract, call it through your own wallet, see the decoded result. It reads the same catalog an agent does, so what you test is what an agent will find.</p>
+        <p style="margin-top:8px"><a href="/studio.html">Open Studio →</a></p></div>
+      <div class="card"><div class="num">03</div><h3>Publishing means proving</h3>
+        <p>A card is only generated after the source is matched against deployed bytecode. There is no "submit and describe" path, because a catalog that publishes what it cannot check is just a list. Verify first, then it appears.</p></div>
+    </div>
+
+    <div class="disc" style="margin-top:22px">
+      <b>Migrating from Remix.</b> Keep using it — Remix speaks plain JSON-RPC, so
+      add CreditChain as a custom network and your workflow is intact. Forge does
+      not try to replace the editor you already like. It covers what an editor
+      cannot: which deployed contracts are real, what they actually enforce, and
+      how an autonomous caller should be bounded when it uses them.
+      <br><br>
+      Honest limits, so nobody is surprised: the catalog is four first-party
+      contracts on one testnet, there is no third-party submission path yet, and
+      <b>nothing here has an external audit</b> — every card says so.
+    </div>
   </section>
 
   <section id="network">
