@@ -1,29 +1,15 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <svg id="Layer_2" data-name="Layer 2" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 152.95 135.77">
   <defs>
-    <style>
-      .cls-1 {
-        fill: #deeaf7;
-      }
-
-      .cls-1, .cls-2, .cls-3 {
-        fill-rule: evenodd;
-        opacity: .4;
-      }
-
-      .cls-2 {
-        fill: #e2f0d9;
-      }
-
-      .cls-3 {
-        fill: #fae4d6;
-      }
-
-      .cls-4 {
-        fill: none;
-        stroke: #162c51;
-        stroke-miterlimit: 8;
-      }
+        <style>
+      /* Painted to be theme-aware and legible at UI sizes. The geometry is the
+         original artwork; only stroke colour, stroke width and fill opacity
+         differ from the print master. */
+      .cls-1 { fill: #deeaf7; }
+      .cls-2 { fill: #e2f0d9; }
+      .cls-3 { fill: #fae4d6; }
+      .cls-1, .cls-2, .cls-3 { fill-rule: evenodd; opacity: .55; }
+      .cls-4 { fill: none; stroke: currentColor; stroke-width: 3; stroke-miterlimit: 8; }
     </style>
   </defs>
   <g id="Layer_1-2" data-name="Layer 1">

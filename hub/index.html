@@ -208,7 +208,7 @@ function render(list){
 function studioUrl(c){
   // Studio selects a contract from location.hash by slug — the same slug this
   // catalog uses — so the deep link needs no change on the Studio side.
-  return "/studio.html#" + encodeURIComponent(c.slug || "");
+  return "/#" + encodeURIComponent(c.slug || "");
 }
 
 function openCard(slug){
