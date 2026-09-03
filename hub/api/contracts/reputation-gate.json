@@ -15,8 +15,8 @@
     "verified": true,
     "verification_method": "deployed bytecode keccak match vs eth_getCode (immutable-aware)",
     "compiler": "0.8.24",
-    "creator": null,
-    "creation_tx": null,
+    "creator": "0x9e1ffc32659f1b8d2f17b79b3b27f9ad14ebfe39",
+    "creation_tx": "0xb328ff2df75e99fff9ec1526d76e8ecfce55512cffa1a93416e0ff2d446f00ed",
     "bytecode_size_bytes": 3016,
     "source_chars": 14528
   },

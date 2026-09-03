@@ -29,6 +29,7 @@
   .stats b{color:var(--ink);font-variant-numeric:tabular-nums}
   .search{width:100%;margin:26px 0 6px;padding:12px 14px;background:var(--panel);
     border:1px solid var(--line);border-radius:10px;color:var(--ink);font-size:15px}
+  .capmatch{margin:10px 0 4px;padding:11px 13px;border:1px solid var(--acc);border-radius:8px;background:rgba(90,120,255,.07);font-size:13px;line-height:1.55}
   .search:focus{outline:none;border-color:var(--acc)}
   .hint{font-size:12px;color:var(--dim);margin-bottom:26px}
   .grid{display:grid;gap:14px;padding:26px 0 60px}
@@ -89,6 +90,7 @@
       <div>chain <b id="s-chain">—</b></div>
     </div>
     <input id="q" class="search" placeholder="Search by intent — e.g. “pay an API per call under a budget”, “revocable”, “reputation”">
+  <div id="capmatch" class="capmatch" style="display:none"></div>
     <div class="hint">Machine-readable first: every card is fetchable as JSON at <code>api/contracts/&lt;slug&gt;.json</code> — agents don't scrape HTML. Start at <a href="api/agent.json">api/agent.json</a>.</div>
   </section>
   <section id="grid" class="grid"></section>
@@ -104,6 +106,7 @@
 
 <script>
 let CARDS = [], INDEX = null;
+let CAPS = null;
 
 const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 
@@ -115,6 +118,8 @@ async function boot(){
   document.getElementById("s-abi").textContent = INDEX.contracts.reduce((a,c)=>a+c.abi_entries,0);
   CARDS = await Promise.all(INDEX.contracts.map(c =>
     fetch(`api/contracts/${c.slug}.json`).then(r=>r.json())));
+  try{ CAPS = await (await fetch("api/capabilities.json")).json(); }
+  catch(e){ CAPS = null; }   // search still works without it, just fuzzily
   render(CARDS);
 }
 
@@ -130,6 +135,24 @@ const SYNONYMS = {
   safe:"bounded enforced guarded", key:"custody private-key"
 };
 function expand(term){ return (term + " " + (SYNONYMS[term] || "")).trim(); }
+
+// Deterministic capability match, tried before the fuzzy ranking. An intent
+// declares the functions it needs; a contract satisfies it only if its ABI has
+// all of them. That is a fact about the interface, not a guess about the words,
+// so when it hits we can show the reader *why* it hit.
+function capabilityMatch(q){
+  if(!CAPS || !CAPS.capabilities) return null;
+  const terms = q.split(/\s+/).filter(t => t.length > 2);
+  if(!terms.length) return null;
+  let best = null;
+  for(const cap of CAPS.capabilities){
+    const hay = (cap.id + " " + cap.intent).toLowerCase();
+    const hits = terms.reduce((n,t) => n + (hay.includes(t) ? 1 : 0), 0);
+    if(hits && (!best || hits > best.hits)) best = {cap, hits};
+  }
+  // One matching word is a coincidence; two is a signal.
+  return best && best.hits >= 2 ? best.cap : null;
+}
 
 function search(q){
   q = q.trim().toLowerCase();
@@ -234,7 +257,27 @@ function openCard(slug){
   document.getElementById("dlg").showModal();
 }
 
-document.getElementById("q").addEventListener("input", e => render(search(e.target.value)));
+document.getElementById("q").addEventListener("input", e => {
+  const q = e.target.value;
+  const cap = capabilityMatch(q.trim().toLowerCase());
+  const banner = document.getElementById("capmatch");
+  if(cap && cap.matches.length){
+    // Show the reasoning, not just the result: the reader can check the claim
+    // against the ABI themselves.
+    banner.innerHTML = `<b>Capability match — ${esc(cap.id)}</b><br>` +
+      `${esc(cap.intent)}<br>` +
+      `<span class="mono">requires ${cap.requires.map(esc).join(" · ")}</span> — ` +
+      `satisfied by ${cap.matches.length} contract${cap.matches.length > 1 ? "s" : ""}, ` +
+      `checked against the ABI rather than the description.`;
+    banner.style.display = "block";
+    const hit = CARDS.filter(c => cap.matches.includes(c.slug));
+    const rest = search(q).filter(c => !cap.matches.includes(c.slug));
+    render(hit.concat(rest));
+  } else {
+    banner.style.display = "none";
+    render(search(q));
+  }
+});
 boot();
 </script>
 </body>

@@ -13,7 +13,16 @@
       "method": "GET",
       "path": "/api/contracts/{slug}.json",
       "returns": "full contract card: provenance, ABI, source, rails, evidence, limitations"
+    },
+    "capabilities": {
+      "method": "GET",
+      "path": "/api/capabilities.json",
+      "returns": "intent -> contracts that satisfy it, plus a function -> contracts index, both computed from ABIs"
     }
+  },
+  "matching": {
+    "how": "Pick an intent, take its `requires` list, keep contracts whose interface.functions is a superset. That is the whole algorithm \u2014 it is deterministic and needs no model.",
+    "note": "An intent's name is editorial; whether a contract satisfies it is computed from the ABI. Match first, rank second."
   },
   "chain": {
     "name": "CreditChain testnet",

@@ -1,0 +1,174 @@
+{
+  "hub": "Forge \u2014 CreditChain AI-era smart contract hub",
+  "spec_version": "0.2",
+  "generated_from": "contract ABIs verified against deployed bytecode; no hand-entered capability claims",
+  "how_to_match": "Take an intent's `requires` and keep every contract whose functions are a superset. Deterministic; no model needed.",
+  "chain": {
+    "name": "CreditChain testnet",
+    "chain_id": 2026042404
+  },
+  "capabilities": [
+    {
+      "id": "bounded-agent-spending",
+      "intent": "Let an autonomous agent spend from my funds under limits I set and can revoke.",
+      "requires": [
+        "createMandate",
+        "spend",
+        "revoke"
+      ],
+      "matches": [
+        "agent-spend-vault"
+      ],
+      "match_count": 1
+    },
+    {
+      "id": "agent-reputation",
+      "intent": "Read or attest an agent's track record from work it actually performed.",
+      "requires": [
+        "score",
+        "attestMandate"
+      ],
+      "matches": [
+        "agent-reputation"
+      ],
+      "match_count": 1
+    },
+    {
+      "id": "reputation-gated-spending",
+      "intent": "Allow spending only by an agent whose reputation clears a threshold I choose.",
+      "requires": [
+        "setPolicy",
+        "spendVia"
+      ],
+      "matches": [
+        "reputation-gate"
+      ],
+      "match_count": 1
+    },
+    {
+      "id": "post-quantum-recovery",
+      "intent": "Keep a break-glass authority that still works if ECDSA is broken.",
+      "requires": [
+        "armGuardian",
+        "breakGlass"
+      ],
+      "matches": [
+        "quantum-guard"
+      ],
+      "match_count": 1
+    }
+  ],
+  "by_function": {
+    "allowRecipient": [
+      "agent-spend-vault",
+      "quantum-guard"
+    ],
+    "allowlisted": [
+      "agent-spend-vault"
+    ],
+    "armGuardian": [
+      "quantum-guard"
+    ],
+    "attestMandate": [
+      "agent-reputation"
+    ],
+    "attestedMandate": [
+      "agent-reputation"
+    ],
+    "breakGlass": [
+      "quantum-guard"
+    ],
+    "breakGlassDigest": [
+      "quantum-guard"
+    ],
+    "controller": [
+      "quantum-guard"
+    ],
+    "createMandate": [
+      "agent-spend-vault"
+    ],
+    "disablePolicy": [
+      "reputation-gate"
+    ],
+    "frozen": [
+      "quantum-guard"
+    ],
+    "fundMandate": [
+      "agent-spend-vault",
+      "quantum-guard"
+    ],
+    "guardian": [
+      "quantum-guard"
+    ],
+    "isArmed": [
+      "quantum-guard"
+    ],
+    "isEligible": [
+      "reputation-gate"
+    ],
+    "mandate": [
+      "agent-spend-vault"
+    ],
+    "mandateCount": [
+      "agent-spend-vault",
+      "quantum-guard"
+    ],
+    "mandateIds": [
+      "quantum-guard"
+    ],
+    "openMandate": [
+      "quantum-guard"
+    ],
+    "outflowLimit": [
+      "quantum-guard"
+    ],
+    "outflowRemaining": [
+      "quantum-guard"
+    ],
+    "outflowWindow": [
+      "quantum-guard"
+    ],
+    "policy": [
+      "reputation-gate"
+    ],
+    "recoveryAddress": [
+      "quantum-guard"
+    ],
+    "reputation": [
+      "agent-reputation",
+      "reputation-gate"
+    ],
+    "revoke": [
+      "agent-spend-vault"
+    ],
+    "score": [
+      "agent-reputation"
+    ],
+    "setPolicy": [
+      "reputation-gate"
+    ],
+    "spend": [
+      "agent-spend-vault"
+    ],
+    "spendVia": [
+      "reputation-gate"
+    ],
+    "spendableNow": [
+      "agent-spend-vault"
+    ],
+    "vault": [
+      "agent-reputation",
+      "quantum-guard",
+      "reputation-gate"
+    ],
+    "windowOutflow": [
+      "quantum-guard"
+    ],
+    "windowStart": [
+      "quantum-guard"
+    ],
+    "withdraw": [
+      "agent-spend-vault"
+    ]
+  }
+}

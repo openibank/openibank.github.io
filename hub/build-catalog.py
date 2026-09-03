@@ -9,12 +9,52 @@ Every claim on a card must trace to evidence: a chain verification, a test run,
 or a named audit. Where evidence does not exist (e.g. no audit), the card says
 so explicitly rather than staying silent.
 """
-import json, pathlib, subprocess, sys, urllib.request
+import json
+import pathlib, subprocess, sys, urllib.request
 
 API = "https://api-testnet.creditchain.org"
 RPC = "https://testnet.creditchain.org"
 CHAIN_ID = 2026042404
 OUT = pathlib.Path(__file__).parent / "api"
+
+
+# ---------------------------------------------------------------------------
+# Capability index.
+#
+# The catalog answers "what is this contract?". An agent needs the inverse:
+# "which contract can do what I need?" -- the question agent-demo.py answers by
+# hand ("requires ABI: createMandate, spend, revoke -> 1/3 candidates qualify").
+# Serving that as data is what makes the hub usable without scraping a page or
+# asking a model to guess.
+#
+# The split matters. `by_function` below is derived entirely from each contract's
+# ABI: it states a fact. The intents here are the one editorial layer -- a name
+# and a required function set -- but whether a contract *satisfies* an intent is
+# computed from its ABI, never asserted. So a wrong entry here can only mis-name
+# a capability; it cannot make the hub claim a contract does something its
+# interface cannot do.
+INTENTS = [
+    {
+        "id": "bounded-agent-spending",
+        "intent": "Let an autonomous agent spend from my funds under limits I set and can revoke.",
+        "requires": ["createMandate", "spend", "revoke"],
+    },
+    {
+        "id": "agent-reputation",
+        "intent": "Read or attest an agent's track record from work it actually performed.",
+        "requires": ["score", "attestMandate"],
+    },
+    {
+        "id": "reputation-gated-spending",
+        "intent": "Allow spending only by an agent whose reputation clears a threshold I choose.",
+        "requires": ["setPolicy", "spendVia"],
+    },
+    {
+        "id": "post-quantum-recovery",
+        "intent": "Keep a break-glass authority that still works if ECDSA is broken.",
+        "requires": ["armGuardian", "breakGlass"],
+    },
+]
 
 # Seed catalog: the three deployed, source-verified CreditChain primitives.
 # `claims` are only things provable from the repo's own test suite.
@@ -224,13 +264,19 @@ def main():
     (OUT / "agent.json").write_text(json.dumps({
         "name": "Forge — CreditChain contract hub",
         "description": "Discover source-verified smart contracts and deploy them under a chain-enforced spending mandate.",
-        "spec_version": "0.1",
+        "spec_version": "0.2",
         "base_url": "https://forge.creditchain.org/hub",
         "endpoints": {
             "list": {"method": "GET", "path": "/api/index.json",
                      "returns": "catalog index with slug, name, summary, tags, verified, audited, tests"},
             "card": {"method": "GET", "path": "/api/contracts/{slug}.json",
                      "returns": "full contract card: provenance, ABI, source, rails, evidence, limitations"},
+            "capabilities": {"method": "GET", "path": "/api/capabilities.json",
+                             "returns": "intent -> contracts that satisfy it, plus a function -> contracts index, both computed from ABIs"},
+        },
+        "matching": {
+            "how": "Pick an intent, take its `requires` list, keep contracts whose interface.functions is a superset. That is the whole algorithm — it is deterministic and needs no model.",
+            "note": "An intent's name is editorial; whether a contract satisfies it is computed from the ABI. Match first, rank second.",
         },
         "chain": {"name": "CreditChain testnet", "chain_id": CHAIN_ID, "rpc": RPC,
                   "explorer": "https://scan.creditchain.org", "native_currency": "CCC",
@@ -260,6 +306,36 @@ def main():
             "usage_metrics": "Only real on-chain counts are ever published; no synthetic popularity numbers.",
         },
     }, indent=2))
+
+    # Capability index — derived from the ABIs just verified, so it can never
+    # claim a contract does something its interface does not expose.
+    by_function = {}
+    for entry in index:
+        card = json.loads((OUT / "contracts" / f"{entry['slug']}.json").read_text())
+        for fn in card["interface"]["functions"]:
+            by_function.setdefault(fn, []).append(entry["slug"])
+
+    capabilities = []
+    for it in INTENTS:
+        matches = [slug for fn_set, slug in (
+            (set(json.loads((OUT / "contracts" / f"{e['slug']}.json").read_text())["interface"]["functions"]), e["slug"])
+            for e in index
+        ) if set(it["requires"]).issubset(fn_set)]
+        capabilities.append(it | {"matches": matches, "match_count": len(matches)})
+        if not matches:
+            print(f"  !! intent '{it['id']}' matches nothing — its `requires` names "
+                  f"functions no catalogued contract exposes", file=sys.stderr)
+
+    (OUT / "capabilities.json").write_text(json.dumps({
+        "hub": "Forge — CreditChain AI-era smart contract hub",
+        "spec_version": "0.2",
+        "generated_from": "contract ABIs verified against deployed bytecode; no hand-entered capability claims",
+        "how_to_match": "Take an intent's `requires` and keep every contract whose functions are a superset. Deterministic; no model needed.",
+        "chain": {"name": "CreditChain testnet", "chain_id": CHAIN_ID},
+        "capabilities": capabilities,
+        "by_function": {k: sorted(v) for k, v in sorted(by_function.items())},
+    }, indent=2))
+    print(f"  capabilities.json: {len(capabilities)} intents, {len(by_function)} functions indexed")
 
     (OUT / "index.json").write_text(json.dumps({
         "hub": "Forge — CreditChain AI-era smart contract hub",
